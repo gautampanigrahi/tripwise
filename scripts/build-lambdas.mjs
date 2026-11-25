@@ -19,7 +19,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const handlersDir = path.join(repoRoot, 'services/api/src/handlers');
 const outRoot = path.join(repoRoot, 'dist/lambda');
 
-export const FUNCTIONS = ['trips', 'invites', 'items', 'catalog', 'checks', 'explain', 'reminder'];
+export const FUNCTIONS = ['trips', 'invites', 'items', 'catalog', 'checks', 'explain', 'reminder', 'drafts'];
 
 rmSync(outRoot, { recursive: true, force: true });
 

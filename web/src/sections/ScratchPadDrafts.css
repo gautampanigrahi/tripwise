@@ -1,0 +1,97 @@
+/* "Draft with AI" card and Drafts Drawer on the Scratch pad tab (task 21.5). Uses tokens from styles.css. */
+.draft-ai__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.draft-ai__selection {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.draft-ai__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.draft-list__heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.draft-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-card__badges,
+.draft-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.draft-card__actions {
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.draft-card__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0;
+}
+
+.draft-card__field {
+  display: contents;
+}
+
+.draft-card__field dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.draft-card__field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-card__missing {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.draft-card__suggested {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}
+
+.draft-card__errors {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.draft-card__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.item-card__select {
+  margin-top: var(--space-2);
+}

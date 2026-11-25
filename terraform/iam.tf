@@ -56,6 +56,12 @@ locals {
       [["dynamodb:GetItem", "dynamodb:Query"], local.table_arns],
       [["sns:Publish"], [local.topic_arn]],
     ]
+    # Read-only on the base table (META, CONSTRAINTS, MEMBER and ScratchPad items by PK;
+    # no GSI1 reads) plus the one model. No write actions (Req 22.17, 25.3).
+    drafts = [
+      [["dynamodb:GetItem", "dynamodb:Query"], local.table_arns],
+      [["bedrock:InvokeModel"], [local.model_arn]],
+    ]
   }
 }
 

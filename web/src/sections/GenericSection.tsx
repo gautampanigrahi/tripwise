@@ -10,7 +10,7 @@ import { useApiClient } from "../api/ApiClientContext";
 import { createItem, deleteItem, updateItem } from "../api/items";
 import { LastModified } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
-import { Badge, Card, ConfirmDialog, EmptyState, TextArea, TextInput, useToast } from "../ui";
+import { Badge, Card, Checkbox, ConfirmDialog, EmptyState, TextArea, TextInput, useToast } from "../ui";
 import {
   centsToDollars,
   describeError,
@@ -24,6 +24,7 @@ import {
   type Editing,
   type MemberOption,
 } from "./planSectionHelpers";
+import { ScratchPadDrafts } from "./ScratchPadDrafts";
 import "./lists.css";
 
 export type GenericSectionName = "Transportation" | "Reservations" | "ScratchPad";
@@ -38,6 +39,10 @@ export interface GenericSectionProps {
   members?: readonly MemberOption[];
   /** Called after any successful write so the page can refetch. */
   onChanged: () => void | Promise<void>;
+  /** ScratchPad only: Trip dates used to re-validate edited Itinerary drafts. */
+  trip?: { startDate: string; endDate: string };
+  /** ScratchPad only: the signed-in Member, so Checklist drafts suggested for them are claimed on accept. */
+  currentUserId?: string;
 }
 
 // Generic rules do not read trip context; validatePlanItem still requires one.
@@ -83,7 +88,16 @@ function fieldsFromForm(form: GenericForm): Record<string, unknown> {
 }
 
 /** Create, view, edit, and delete for the Transportation, Reservations, and ScratchPad Sections (Req 5.8). */
-export function GenericSection({ tripId, section, heading, items, members, onChanged }: GenericSectionProps) {
+export function GenericSection({
+  tripId,
+  section,
+  heading,
+  items,
+  members,
+  onChanged,
+  trip,
+  currentUserId,
+}: GenericSectionProps) {
   const client = useApiClient();
   const toast = useToast();
   const formId = useId();
@@ -94,6 +108,19 @@ export function GenericSection({ tripId, section, heading, items, members, onCha
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState<GenericItem | null>(null);
   const pendingDelete = usePendingDelete<GenericItem>();
+  const drafting = section === "ScratchPad";
+  // "Use for drafting" selection; IDs of deleted items are dropped when sent.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const selectedIds = items.filter((i) => selected.has(i.itemId)).map((i) => i.itemId);
+
+  function toggleSelected(itemId: string, on: boolean) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (on) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+  }
   const errorFor = (field: string) => errorsFor(fieldErrors, field);
   const headingId = `${section.toLowerCase()}-heading`;
 
@@ -173,6 +200,16 @@ export function GenericSection({ tripId, section, heading, items, members, onCha
   return (
     <section aria-labelledby={headingId} className="list-section">
       <SectionHeader id={headingId} title={heading} addLabel="Add item" onAdd={startCreate} />
+      {drafting && (
+        <ScratchPadDrafts
+          tripId={tripId}
+          selectedIds={selectedIds}
+          members={members}
+          trip={trip}
+          currentUserId={currentUserId}
+          onChanged={onChanged}
+        />
+      )}
       {items.length === 0 ? (
         <EmptyState title="Nothing here yet" description={EMPTY_COPY[section]} />
       ) : (
@@ -208,6 +245,18 @@ export function GenericSection({ tripId, section, heading, items, members, onCha
                       </div>
                     )}
                     {f.notes && <p className="item-card__notes">{f.notes}</p>}
+                    {drafting && (
+                      <Checkbox
+                        fieldClassName="item-card__select"
+                        label={
+                          <>
+                            Use for drafting<span className="visually-hidden">: {f.title}</span>
+                          </>
+                        }
+                        checked={selected.has(item.itemId)}
+                        onChange={(e) => toggleSelected(item.itemId, e.target.checked)}
+                      />
+                    )}
                   </div>
                   <div className="item-card__actions">
                     <ItemActions

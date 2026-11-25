@@ -397,9 +397,8 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     - `infra/lib/constructs/observability.ts` (Lambda `Errors > 0` per function, API 5xx rate, `TemplateFallbackCount > 3` per hour) wired in `lib/tripwise-stack.ts`
     - _Requirements: 25.2, 26.2, 26.3_
 
-  - [ ] 15.8 Implement Bedrock drafting and trip summary (optional extension)
-    - `services/api/src/handlers/drafting.ts` behind `ENABLE_DRAFTING` (scratch-pad draft returned unsaved; trip summary from redacted Plan_Items and latest Check_Result, 422 `SUMMARY_UNGROUNDED`); add routes in `src/routes.ts` and `infra/lib/constructs/api.ts`; add a Draft button in `web/src/sections/GenericSection.tsx`
-    - _Requirements: 22.1, 22.2, 22.3_
+  - [ ] 15.8 Superseded by task 21
+    - Do not implement. Scratch pad drafting (Requirement 22, design section 8a) is now covered by task 21; the trip summary and `ENABLE_DRAFTING` flag were dropped from the design. Leave this item unchecked.
 
 - [x] 16. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
@@ -501,18 +500,67 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     - Run the web typecheck, `npm run build -w web`, and all vitest tests
     - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 21. Implement scratch pad drafting with Bedrock
+  - Follow design section "8a. Scratch Pad Drafting (Req 22)", the drafting rows in sections 10 and 11, and the Scratch pad drafting paragraph in section 12. No feature flag, no trip summary, and the drafts route never writes Plan_Items.
+  - [x] 21.1 Implement the pure drafting helpers in `packages/grounding`
+    - `packages/grounding/src/drafting.ts`: `DRAFTING_SECTIONS`, `DraftingSection`, `MAX_DRAFT_NOTES` (4,000), `MAX_DRAFT_ITEMS` (20), `DRAFT_FIELDS`, `DraftPromptInput`, `DraftItem`, `DraftResponse`, `DraftRequestSchema` (strict zod), and the functions `buildDraftPrompt`, `parseDraftResponse`, `filterDraftSections`, `resolveMemberName`, `groundDraftCosts` as specified in the design
+    - `buildDraftPrompt` takes only `DraftPromptInput` (notes, trip dates, destination, optional traveler count, Member display names) and puts the JSON-only instruction, field list, schema example, and `<notes>` delimiters in the prompt
+    - `parseDraftResponse` strips code fences, takes the first JSON array or object (accepting `items`/`drafts` arrays), skips malformed entries, and returns `ok: false` only when nothing parses
+    - `resolveMemberName` trims and matches case-insensitively, returning a userId only for exactly one match; `groundDraftCosts` keeps `costCents` (as cents or cents/100) and `amount` only when found by the existing `extractNumbers` on the notes
+    - Export everything from `packages/grounding/src/index.ts`
+    - Unit tests in `packages/grounding/src/drafting.test.ts`: prompt contents and exclusions, fenced and prose-wrapped JSON, non-JSON output, section filtering before the 20-item cap, ambiguous and unknown names, grounded and ungrounded costs
+    - _Requirements: 22.5, 22.6, 22.8, 22.9, 22.10, 22.11, 22.12, 22.13, 22.14_
+
+  - [ ]* 21.2 Write property tests for drafting
+    - **Property 37: Draft prompt contains only whitelisted data**
+    - **Property 38: Draft parsing keeps the first 20 items in Drafting_Sections**
+    - **Property 39: Prepared drafts keep only resolved people and grounded costs**
+    - **Property 40: Draft validity matches the Section validator and nothing is stored** (runs the drafts handler from 21.3 against the in-memory repository fakes)
+    - **Validates: Requirements 22.5, 22.6, 22.8, 22.9, 22.10, 22.11, 22.12, 22.13, 22.14, 22.15, 22.16, 22.17**
+
+  - [x] 21.3 Implement the drafts handler and wire its route
+    - `services/api/src/handlers/drafts.ts`: `routes` with one entry `{ routeKey: 'POST /trips/{tripId}/drafts', guard: 'write', run }` and `handler = dispatch(routes, getDeps)`, so the Membership lookup is the only read before the guard
+    - Validate the body with `DraftRequestSchema`; emit `DraftRequestCount = 1`; load Trip `META`, `CONSTRAINTS` (traveler count optional), Memberships, and the selected ScratchPad items with `ConsistentRead`; return 400 `VALIDATION` for an unknown itemId or Draft_Notes empty or over 4,000 characters, without calling Bedrock
+    - Call Bedrock `ConverseCommand` with `MODEL_ID`, temperature 0, maxTokens 1500, and an 8 s `AbortSignal.timeout`; then parse, filter, cap at 20, resolve names (`responsibleMember` → `responsibleMemberId`; Checklist `claimedBy` → `suggestedClaimedBy`, removed from `fields`), ground costs, and set `valid`/`errors` with `validatePlanItem` (including the Itinerary day range)
+    - Map failures to `502 { error: 'DRAFT_FAILED', reason }` with `MODEL_ACCESS_DENIED`, `TIMEOUT`, `BEDROCK_ERROR`, or `UNPARSEABLE`; log only `{ event: 'DRAFT_FAILED', tripId, reason }`; never log notes, prompt, or response; emit `DraftItemCount` and return `200 { drafts }` with no writes
+    - Widen the key pattern in `packages/shared/src/redact.ts` to the design's list (adding `notes`, `draftnotes`, `prompt`, `system`, `messages`, `output`) and update its tests
+    - `services/api/src/routes.ts`: add `'drafts'` to the `RouteEntry['fn']` union and `...entries('drafts', draftsRoutes)` to `allRoutes`
+    - Unit tests in `services/api/src/handlers/drafts.test.ts` with `aws-sdk-client-mock` and the in-memory repos: model ID, temperature, and JSON instruction; empty, 4,000-, and 4,001-character notes and unknown itemId (400, Bedrock not called); access denied, generic error, 8 s timeout with fake timers, and non-JSON output (502 with matching `reason`, `DRAFT_FAILED` log, no writes); logs never contain the notes; both metrics emitted
+    - _Requirements: 22.3, 22.4, 22.5, 22.6, 22.7, 22.9, 22.10, 22.11, 22.12, 22.13, 22.14, 22.15, 22.16, 22.17, 22.24, 22.26, 22.27, 22.28, 22.29_
+
+  - [x] 21.4 Add drafts-fn to Terraform and the Lambda build
+    - `terraform/api.tf`: add `"drafts"` to `local.function_keys`; add `drafts = { timeout = 10, env = merge(local.base_env, { MODEL_ID = var.model_id }) }` to `local.functions` (`base_env` holds `TABLE_NAME` and `GSI1_NAME`); add `"POST /trips/{tripId}/drafts" = "drafts"` to `local.routes` so the integration, JWT-authorized route, and Lambda permission are created
+    - `terraform/iam.tf`: add a `drafts` role policy with `dynamodb:GetItem, Query` on the table (the design's IAM table lists the table only; add the GSI1 ARN only if the handler's reads need it), `bedrock:InvokeModel` on `local.model_arn`, and `logs:CreateLogStream, PutLogEvents` on its own log group; no write actions
+    - `scripts/build-lambdas.mjs`: add `'drafts'` to `FUNCTIONS` so `dist/lambda/drafts.zip` is built
+    - `services/api/src/routes.test.ts` must stay green (routes in `routes.ts` match `terraform/api.tf`)
+    - _Requirements: 22.3, 22.7, 22.24, 25.1, 25.3_
+
+  - [x] 21.5 Implement the "Draft with AI" UI on the Scratch pad tab
+    - `web/src/api/drafts.ts`: `createDrafts(tripId, { itemIds?, notes? })` returning `DraftResponse` through the existing API client
+    - `web/src/sections/GenericSection.tsx` (only when `section === 'ScratchPad'`): "Draft with AI" card with a "Use for drafting" `Checkbox` on each item card, a "Draft from notes" textarea with a live count against 4,000, and a "Create drafts" `Button`
+    - Results `Drawer` with draft cards grouped by Section showing fields, field errors, and "Suggested: <name>" for Checklist; Edit (prefilled Section form updating the local draft and re-running `validatePlanItem`), Accept (existing `createItem`; on 201 remove the card and toast "Added to <Section>", on 400 keep the card with returned errors), Discard (local only), and "Accept all valid" (saves valid drafts one at a time, toast "N added, M need fixes")
+    - After a Checklist create, call the existing claim route only when `suggestedClaimedBy` equals the accepting Member
+    - On 502 or network error: no Drawer, error toast and inline "Drafts could not be created. Try again in a moment.", selection and textarea unchanged; on 400 show the message under the textarea
+    - Use the `web/src/ui` primitives; no new dependencies
+    - _Requirements: 22.1, 22.2, 22.18, 22.19, 22.20, 22.21, 22.22, 22.23, 22.25_
+
+  - [x] 21.6 Checkpoint - Drafting builds, validates, and all tests pass
+    - Run the typechecks, all vitest tests, `npm run build:lambdas`, `npm run build -w web`, and `terraform fmt -check` and `terraform validate` in `terraform/`
+    - Ensure all tests pass, ask the user if questions arise.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
 - Each task references specific requirements for traceability. Requirements 23.2 and 27.5 (second Member sees changes after reload) are covered by `ConsistentRead` reads (8.2) and load-time fetches (12.1); confirm them manually after deployment.
 - Property tests use fast-check with at least 100 runs and a tag comment: `// Feature: tripwise-trip-planner, Property N: <title>`.
 - Property 16, 22, 29, 2, 3, 6, 7, and 9 run handlers against the in-memory repository fakes from task 8.2.
-- Tasks 15.3, 15.4, and 15.8 implement optional extensions and can be dropped if week 4 runs short.
+- Tasks 15.3 and 15.4 implement optional extensions and can be dropped if week 4 runs short. Task 15.8 is superseded by task 21 and must not be implemented; it stays in wave 21 of the graph only because every unchecked leaf task must appear in a wave.
 - Task 17 replaces the CDK app in `infra/` (tasks 5.1, 5.2, 11.11) with Terraform in `terraform/`. `cdk bootstrap` is no longer needed. Deploy with `scripts/deploy.sh`, which needs the AWS CLI, Terraform, and credentials for the target account. References to `infra/` in tasks 15.7 and 15.8 now mean the equivalent files in `terraform/`.
 - Task 17 does not depend on tasks 15.x or 16. In the dependency graph its waves (15–18) run right after checkpoint 14 and before the remaining 15.x tasks and checkpoint 16.
 - Task 18 is listed after task 17 but runs in wave 20, after task 15.1 (both touch `web/src/pages/TripPage.tsx` and section components) and before checkpoint 16. Task 15.8 also edits `web/src/sections/GenericSection.tsx`, so it stays in wave 21, after task 18.
 - Task 19 switches the Bedrock model from Anthropic Claude to Amazon Nova Lite (`amazon.nova-lite-v1:0`, on-demand in us-west-2) because the AWS Free plan cannot create the AWS Marketplace agreements Claude models require. It depends only on task 18. It sits alone in final wave 23 for ordering; it does not need tasks 15.7, 15.8, or checkpoint 16 to be done.
 - Task 20 reworks the web UI with plain CSS (design section 12) and replaces the basic stylesheet from task 18. It runs in waves 24–27 after task 19. Task 20.1 runs alone because every later sub-task uses its primitives. Tasks 20.2–20.6 touch different files and run in parallel; 20.3 owns `web/src/pages/TripPage.tsx`. Task 20.7 touches all screens, so it runs after them, together with optional tests 20.8.
+- Task 21 implements Requirement 22 (design section 8a) in waves 28–31 after checkpoint 20.9. Task 21.1 runs alone because the handler uses its helpers and types. Tasks 21.3 (API, `routes.ts`, `redact.ts`), 21.4 (Terraform and build script), and 21.5 (web) touch different files and run in parallel; 21.5 needs only the API shape from the design. Optional property tests 21.2 run in their own wave after 21.3 because Property 40 exercises the drafts handler. Checkpoint 21.6 runs last.
 
 ## Task Dependency Graph
 
@@ -546,7 +594,11 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 24, "tasks": ["20.1"] },
     { "id": 25, "tasks": ["20.2", "20.3", "20.4", "20.5", "20.6"] },
     { "id": 26, "tasks": ["20.7", "20.8"] },
-    { "id": 27, "tasks": ["20.9"] }
+    { "id": 27, "tasks": ["20.9"] },
+    { "id": 28, "tasks": ["21.1"] },
+    { "id": 29, "tasks": ["21.3", "21.4", "21.5"] },
+    { "id": 30, "tasks": ["21.2"] },
+    { "id": 31, "tasks": ["21.6"] }
   ]
 }
 ```

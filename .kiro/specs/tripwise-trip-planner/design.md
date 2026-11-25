@@ -8,7 +8,7 @@ TripWise is a private, serverless trip planner for friend groups. The build has 
 - An API Gateway HTTP API with a Cognito JWT authorizer, backed by TypeScript Lambda functions on Node.js 20. Each function has its own IAM role.
 - One DynamoDB table (single-table design) for Trips, Memberships, Invitations, Plan_Items, Trip_Constraints, and Check_Results.
 - S3 for web assets, private confirmation files, and the versioned Catalog JSON.
-- A **pure TypeScript Feasibility_Engine package** with no AWS SDK imports, so fast-check can test it directly. Amazon Bedrock is used only to explain an already-computed Check_Result, and its output is checked against the stored numbers.
+- A **pure TypeScript Feasibility_Engine package** with no AWS SDK imports, so fast-check can test it directly. Amazon Bedrock is used for two tasks: explaining an already-computed Check_Result (its output is checked against the stored numbers), and turning Scratch pad notes into unsaved Draft_Items (whose costs are checked against the numbers in the notes and whose fields go through the normal Section validators).
 
 The main design rule is that **all decisions are deterministic and live in pure functions**: the feasibility checks, the score, validation, authorization decisions, number grounding, message building, schedule-time calculation, and log redaction. Lambda handlers are thin adapters that load data, call the pure functions, and persist the results. Every pure function can therefore be property-tested with in-memory fakes.
 
@@ -22,7 +22,8 @@ The main design rule is that **all decisions are deterministic and live in pure 
 | Concurrency | DynamoDB `ConditionExpression` on `lastModifiedAt` (optimistic locking) | Req 23.3, with no locks or extra infrastructure. |
 | Read consistency | `ConsistentRead: true` on all trip reads | Req 23.2: a write is visible on every Member's next request. |
 | Validation | zod schemas in a shared package, used by both API and app | One source of truth. Errors report each field path (Req 5.6). |
-| Bedrock call | Separate `explain-fn` Lambda, invoked synchronously by `checks-fn` | Only this function holds `bedrock:InvokeModel`. It has a 10 s timeout (Req 21.5). |
+| Bedrock call | Separate `explain-fn` Lambda, invoked synchronously by `checks-fn` | Only explain-fn and drafts-fn hold `bedrock:InvokeModel`. explain-fn has a 10 s timeout (Req 21.5). |
+| Drafting | New `drafts-fn` Lambda behind `POST /trips/{tripId}/drafts`; returns Draft_Items only, and accepting a draft reuses the existing create-item route | Least privilege: drafts-fn can read the table and call Bedrock but cannot write anything. Stamping and validation on save are the existing code paths (Req 22.17, 22.19, 22.20). |
 | Optional checks | Enabled by `ENABLED_CHECKS` env var on `checks-fn` (e.g. `Cost,Capacity,Dates,Schedule`) | Optional extensions (Req 17, 18) can ship without code forks. |
 | Real-time | None. The app refetches on load or reload | Recorded Assumption 5. |
 
@@ -43,6 +44,7 @@ flowchart LR
   APIGW --> ITEMS[items-fn]
   APIGW --> CHECKS[checks-fn]
   APIGW --> CAT[catalog-fn]
+  APIGW --> DRAFTS[drafts-fn]
 
   TRIPS --> DDB[(DynamoDB<br/>tripwise-table)]
   INV --> DDB
@@ -53,6 +55,8 @@ flowchart LR
   CHECKS --> S3Cat
   CHECKS -- invoke --> EXPLAIN[explain-fn]
   EXPLAIN --> BR[Amazon Bedrock]
+  DRAFTS -- read only --> DDB
+  DRAFTS --> BR
 
   INV --> SNS[SNS topic]
   CHECKS --> SNS
@@ -61,7 +65,7 @@ flowchart LR
   REM --> DDB
   REM --> SNS
 
-  TRIPS & INV & ITEMS & CHECKS & CAT & EXPLAIN & REM --> CW[CloudWatch Logs + Metrics]
+  TRIPS & INV & ITEMS & CHECKS & CAT & EXPLAIN & REM & DRAFTS --> CW[CloudWatch Logs + Metrics]
 ```
 
 ### Feasibility Check Flow
@@ -101,12 +105,12 @@ sequenceDiagram
 ```
 /packages/shared      # zod schemas, domain types, message builders, redaction, date utils
 /packages/engine      # Feasibility_Engine: pure functions only, no AWS imports
-/packages/grounding   # number extraction + grounding verifier + template explanation (pure)
+/packages/grounding   # number extraction + grounding verifier + template explanation + drafting prompt/parse/grounding (pure)
 /services/api         # Lambda handlers, repositories (DynamoDB/S3/SNS/Scheduler/Bedrock adapters)
 /terraform            # Terraform root module (AWS provider, single `region` variable); replaces the removed CDK app in /infra
 /web                  # React + Vite SPA
 /scripts/seed.ts      # demo seed (Req 27)
-/scripts/build-lambdas.ts  # esbuild bundles of the 7 handlers → dist/lambda/<name>.zip
+/scripts/build-lambdas.ts  # esbuild bundles of the 8 handlers → dist/lambda/<name>.zip
 /scripts/deploy.sh    # build lambdas, terraform apply, build web, s3 sync, CloudFront invalidation
 /catalog/san-diego-v1.json
 vitest.workspace.ts   # `npx vitest --run` runs every package's tests
@@ -188,6 +192,7 @@ Every route in the route table is registered through `withTripGuard`. A unit tes
 | `POST /trips/{tripId}/checks` | checks-fn | runCheck | 13.x, 21.x, 24.1 |
 | `POST /trips/{tripId}/checks/alternatives` | checks-fn | runCheck | 20.1, 20.2 |
 | `GET /trips/{tripId}/checks` | checks-fn | read | 13.6 |
+| `POST /trips/{tripId}/drafts` | drafts-fn | write | 22.1–22.17, 22.24–22.29 |
 
 The accept route does not use `withTripGuard`, because the caller is not a Member yet. It checks `caller.emailVerified && caller.email === invitation.email` (normalized lowercase) and otherwise returns 403 with no writes (Req 3.5).
 
@@ -406,7 +411,7 @@ export function buildAlternativeInput(base: EngineInput, stay: CatalogStay,
 
 `latestChecks` holds the check names of the latest non-alternative Check_Result. If there is none, the handler returns 422. The handler saves the result with `kind: 'alternative'` and `evaluatedStayId`, and it performs **no writes** to Plan_Item keys. The SPA renders the outcomes of the alternative and the latest non-alternative result side by side (Req 20.3).
 
-### 8. Explanation_Service (Req 21, 22)
+### 8. Explanation_Service (Req 21)
 
 `explain-fn` input is `{ tripId, checkResultId }`. The function reads the Check_Result and builds the prompt from a fixed projection:
 
@@ -462,7 +467,102 @@ On fallback, the function logs `{ event: 'EXPLANATION_FALLBACK', reason }` and e
 
 Number words such as "four" are not detected. The prompt reduces this risk, and the limitation is accepted for the MVP.
 
-**Optional drafting (Req 22).** These routes are behind `ENABLE_DRAFTING`. Scratch-pad drafts are returned and never auto-saved. A trip summary receives `{ planItems, latestCheckResult }` with secret fields redacted, and it reuses `extractNumbers` against the numbers in that input. If ungrounded numbers or ungrounded availability phrases ("available", "sleeps N") are found, the route returns `422 { error: 'SUMMARY_UNGROUNDED' }`.
+### 8a. Scratch Pad Drafting (Req 22)
+
+Drafting turns Draft_Notes into unsaved Draft_Items. There is no feature flag and no trip summary. The route is always deployed, returns Draft_Items only, and never writes to the table (Req 22.17).
+
+**Route and handler.** `services/api/src/handlers/drafts.ts` exports `routes: RouteDef<DraftsDeps>[]` with one entry, `{ routeKey: 'POST /trips/{tripId}/drafts', guard: 'write', run }`, and `handler = dispatch(routes, getDeps)` from `src/lib/routes.ts`. `dispatch` applies `withTripGuard('write', …)`, so the Membership lookup is the only read before the guard (Req 22.3). `src/routes.ts` adds `'drafts'` to the `RouteEntry['fn']` union and `...entries('drafts', draftsRoutes)` to `allRoutes`, so `routes.test.ts` finds the route in both `allRoutes` and `terraform/api.tf`.
+
+```typescript
+// Request body (zod .strict(); userId and similar keys are rejected as in Req 4.4)
+export const DraftRequestSchema = z.strictObject({
+  itemIds: z.array(z.string().min(1)).max(50).optional(),   // selected ScratchPad items (22.1)
+  notes: z.string().optional(),                              // "Draft from notes" text (22.2)
+});
+
+export const DRAFTING_SECTIONS = ['Itinerary', 'Groceries', 'Checklist', 'Reservations', 'Transportation'] as const;
+export type DraftingSection = typeof DRAFTING_SECTIONS[number];
+export const MAX_DRAFT_NOTES = 4000;
+export const MAX_DRAFT_ITEMS = 20;
+
+export interface DraftItem {
+  draftId: string;                       // random UUID, not persisted
+  section: DraftingSection;
+  fields: Record<string, unknown>;       // raw fields, in the shape the create-item route accepts
+  valid: boolean;                        // === validatePlanItem(section, fields, ctx).ok
+  errors: FieldError[];                  // [] when valid (22.16)
+  suggestedClaimedBy?: string;           // Checklist only; see "Member names" below
+}
+export interface DraftResponse { drafts: DraftItem[] }
+```
+
+**Draft_Notes source.** Both sources may be sent in one request, and at least one is required. The handler builds Draft_Notes as the text of the selected ScratchPad items (each item's `title`, then `notes` if present, one item per paragraph, in the order of `itemIds`), followed by a blank line and the trimmed `notes` text. The selected items are read with one `Query PK = TRIP#id, begins_with(SK, 'ITEM#ScratchPad#')` after the guard. An itemId that is not a ScratchPad item of this Trip returns `400 { error: 'VALIDATION', fields: [{ field: 'itemIds', message: 'Unknown Scratch pad item' }] }`. If the combined text is empty after trimming or longer than 4,000 characters, the handler returns `400 { error: 'VALIDATION', fields: [{ field: 'notes', message: 'Draft notes must be 1 to 4,000 characters' }] }` and does not call Bedrock (Req 22.4).
+
+**Handler steps.**
+
+1. Emit `DraftRequestCount = 1` (Req 22.28).
+2. Load the Trip `META` (start date, end date, destination), the `CONSTRAINTS` item (traveler count, omitted from the prompt if constraints are not saved yet), and the Memberships (`Query begins_with(SK, 'MEMBER#')`). All reads use `ConsistentRead`.
+3. Build Draft_Notes as above and validate the length.
+4. `buildDraftPrompt(input)` from `packages/grounding`, then call Bedrock Converse.
+5. `parseDraftResponse(text)`, then `filterDraftSections`, then `.slice(0, 20)`. Filtering runs before the cap, so the 20 kept items are the first 20 items in Drafting_Sections (Req 22.9, 22.10).
+6. Resolve Member names to user IDs (Req 22.11, 22.12).
+7. `groundDraftCosts(draft, notes)` (Req 22.13, 22.14).
+8. `validatePlanItem(section, fields, { trip, memberIds })` from `packages/shared/src/sections.ts`, the same function the create-item route uses, including the Itinerary day range (Req 22.15, 22.16). The draft keeps its raw `fields` (for example Expenses-style transforms do not apply, and Generic `costCents` stays as cents), so the App can send them unchanged to the create route.
+9. Emit `DraftItemCount = drafts.length` (Req 22.29) and return `200 { drafts }`.
+
+**Bedrock call (Req 22.7, 22.24).** drafts-fn uses the same `MODEL_ID` env var as explain-fn (Amazon Nova Lite, e.g. `amazon.nova-lite-v1:0` or its inference profile):
+
+```typescript
+const out = await bedrock.send(new ConverseCommand({
+  modelId: process.env.MODEL_ID,
+  system: [{ text: prompt.system }],
+  messages: [{ role: 'user', content: [{ text: prompt.user }] }],
+  inferenceConfig: { temperature: 0, maxTokens: 1500 },
+}), { abortSignal: AbortSignal.timeout(8_000) });
+```
+
+Failures map to a reason code, and every failure returns `502 { error: 'DRAFT_FAILED', reason }` with no writes:
+
+| Condition | `reason` |
+|---|---|
+| `AccessDeniedException`, including accounts where model access to Amazon Nova Lite is blocked because the AWS Free plan does not allow the AWS Marketplace subscription Bedrock uses to grant model access | `MODEL_ACCESS_DENIED` |
+| Abort after 8 s (`AbortError`/`TimeoutError`) | `TIMEOUT` |
+| Any other Bedrock SDK error | `BEDROCK_ERROR` |
+| `parseDraftResponse` returns `ok: false` | `UNPARSEABLE` |
+
+On failure the handler logs `{ event: 'DRAFT_FAILED', tripId, reason }` (Req 22.26). The 8 s abort leaves room inside the 10 s Lambda timeout to log and return the 502. The free-plan case is called out because it is the usual cause of `MODEL_ACCESS_DENIED` in demo accounts. The fix is to enable model access or upgrade the account plan, and the App shows the same generic message for every reason.
+
+**Pure drafting module: `packages/grounding/src/drafting.ts`** (exported from `index.ts`):
+
+```typescript
+export interface DraftPromptInput {
+  notes: string;
+  trip: { startDate: IsoDate; endDate: IsoDate; destination: string };
+  travelerCount?: number;
+  memberNames: string[];                                  // display names only, never IDs or emails
+}
+export const DRAFT_FIELDS: Record<DraftingSection, readonly string[]> = {
+  Itinerary:      ['day', 'startTime', 'endTime', 'stopName', 'notes'],
+  Groceries:      ['name', 'quantity', 'responsibleMember', 'purchased'],
+  Checklist:      ['task', 'done', 'claimedBy'],
+  Reservations:   ['title', 'notes', 'date', 'link', 'costCents'],
+  Transportation: ['title', 'notes', 'date', 'link', 'costCents'],
+};
+
+export function buildDraftPrompt(input: DraftPromptInput): { system: string; user: string };
+export function parseDraftResponse(text: string):
+  { ok: true; items: Array<{ section: string; fields: Record<string, unknown> }> } | { ok: false };
+export function filterDraftSections<T extends { section: string }>(items: T[]): Array<T & { section: DraftingSection }>;
+export function resolveMemberName(name: unknown, members: Array<Pick<Membership, 'userId' | 'displayName'>>): string | undefined;
+export function groundDraftCosts<T extends { fields: Record<string, unknown> }>(draft: T, notes: string): T;
+```
+
+- `buildDraftPrompt` takes a `DraftPromptInput`, so only whitelisted values can reach the prompt (Req 22.5, 22.6). The handler builds that input from the Trip, constraints, and `memberships.map(m => m.displayName)`. It never passes Plan_Items other than the selected ScratchPad text, Lodging fields, emails, user IDs, or tokens. The `system` text says: return only JSON, an array of objects `{ "section": <one of the listed sections>, "fields": { … } }`; use only the listed field names; use `YYYY-MM-DD` dates within the trip dates and `HH:mm` times; put people as a Member display name from the list; give `costCents` only when the notes state a price; do not invent prices; at most 20 items. It includes one schema example, e.g. `[{"section":"Groceries","fields":{"name":"Eggs","quantity":12,"responsibleMember":"Sam"}},{"section":"Itinerary","fields":{"day":"2025-06-13","startTime":"10:00","stopName":"Balboa Park"}}]` (Req 22.8). The `user` text carries the trip facts, the member names, the section/field list, and the notes between `<notes>` delimiters.
+- `parseDraftResponse` is tolerant. It strips Markdown code fences, takes the substring from the first `[` or `{` to its matching closing bracket, and `JSON.parse`s it. An object with an `items` or `drafts` array is accepted as that array. Entries that are not objects with a string `section` and an object `fields` are skipped. The result is `ok: false` only when no JSON array or object can be parsed.
+- Member names (Req 22.11, 22.12): `resolveMemberName` trims and compares case-insensitively with each Member's `displayName`. It returns the userId only when exactly one Member matches; otherwise it returns `undefined` and the field stays unassigned. Groceries `responsibleMember` becomes `responsibleMemberId` (left out when unresolved, so validation flags the required field and the Member picks someone). Checklist `claimedBy` is server-controlled and rejected by `ChecklistSchema` (Req 4.4), so the resolved ID goes to `DraftItem.suggestedClaimedBy` and is removed from `fields`. The card shows it as "Suggested: <name>". On accept, the App calls the existing claim route after the create only when `suggestedClaimedBy` equals the accepting Member. A payer name would be mapped the same way (`payer` → `payerMemberId`), but Expenses is not a Drafting_Section, so with the current list the payer mapping never runs.
+- `groundDraftCosts` uses the existing `extractNumbers` (Req 21.3) on the notes. A `costCents` value is kept if `costCents / 100` or `costCents` is among the extracted numbers, and an `amount` value is kept if `Number(amount)` is among them. Otherwise that field is deleted from `fields` (Req 22.13, 22.14). No other field changes.
+
+**Accepting drafts (Req 22.19, 22.20).** There is no save endpoint for drafts. The App calls the existing `POST /trips/{tripId}/sections/{section}/items` with `draft.fields`. items-fn stamps `lastModifiedBy` from the token and validates with `validatePlanItem` exactly as for a manual create. A failure returns the existing `400 { error: 'VALIDATION', fields }`.
 
 ### 9. Notification_Service and Reminder_Scheduler (Req 3.2, 24)
 
@@ -482,15 +582,16 @@ export function reminderMessage(tripName: string, startDate: IsoDate): { subject
 ### 10. Observability and Log Redaction (Req 25.6, 26)
 
 - `withRequestLogging(handler)` logs one JSON line per request: `{ requestId, route, status, durationMs }` (Req 26.1). It uses `@aws-lambda-powertools/logger`.
-- `redact(value)` is a pure deep copy that replaces the value of any key matching `/^(doorcode|confirmationnumber|authorization|idtoken|accesstoken|token|checkindetails)$/i` with `"[REDACTED]"`. The logger runs every log payload through it (Req 25.6). Handlers never log raw events or headers.
-- Metrics use Powertools Metrics (EMF) in namespace `TripWise`: `CheckRunDurationMs`, `FailedCheckCount` (Req 26.2), and `TemplateFallbackCount` (Req 26.3).
+- `redact(value)` is a pure deep copy that replaces the value of any key matching `/^(doorcode|confirmationnumber|authorization|idtoken|accesstoken|token|checkindetails|notes|draftnotes|prompt|system|messages|output)$/i` with `"[REDACTED]"`. The logger runs every log payload through it (Req 25.6). Handlers never log raw events or headers.
+- Metrics use Powertools Metrics (EMF) in namespace `TripWise`: `CheckRunDurationMs`, `FailedCheckCount` (Req 26.2), `TemplateFallbackCount` (Req 26.3), `DraftRequestCount` (Req 22.28), and `DraftItemCount` (Req 22.29).
+- Drafting logs (Req 22.26, 22.27): drafts-fn logs only `{ event: 'DRAFT_FAILED', tripId, reason }` and the standard request line. It never passes the Draft_Notes, the prompt, or the Bedrock response to the logger. As a second guard, the `redact` key pattern above covers `notes`, `draftnotes`, `prompt`, `system`, `messages`, and `output`, so these values are replaced if a draft request object or SDK error payload is logged by mistake.
 - CloudWatch alarms: Lambda `Errors > 0` per function (5 min), API 5xx rate, and `TemplateFallbackCount > 3` per hour.
 
 ### 11. Infrastructure (Terraform, Req 25)
 
 Infrastructure is defined in Terraform under `terraform/`, replacing the earlier AWS CDK app. The `infra/` workspace (CDK stack, constructs, and its CDK assertion tests) is removed, and `cdk bootstrap` is no longer needed. The root module uses the AWS provider configured from a single `region` variable (default `us-west-2`), so every resource lives in one Region (Req 25.1). Deployment has three steps:
 
-1. **Lambda build**: `scripts/build-lambdas.ts` (npm script `build:lambdas`) bundles each of the 7 handlers in `services/api/src/handlers/*.ts` with esbuild (platform node, target `node20`, arm64-compatible output, AWS SDK bundled) and zips each bundle into `dist/lambda/<name>.zip`. Terraform's `aws_lambda_function` resources reference these zips with `source_code_hash`.
+1. **Lambda build**: `scripts/build-lambdas.ts` (npm script `build:lambdas`) bundles each of the 8 handlers in `services/api/src/handlers/*.ts` with esbuild (platform node, target `node20`, arm64-compatible output, AWS SDK bundled) and zips each bundle into `dist/lambda/<name>.zip`. Terraform's `aws_lambda_function` resources reference these zips with `source_code_hash`.
 2. **Infrastructure**: `terraform apply` creates or updates all resources below and exposes outputs `AppUrl`, `ApiUrl`, `UserPoolId`, `UserPoolClientId`, `CognitoDomain`, `DataBucketName`, `TableName`, `ReminderFunctionArn`, and `SchedulerRoleArn`.
 3. **Web and Catalog upload**: `scripts/deploy.sh` writes `web/.env.local` from the Terraform outputs, builds the web app, runs `aws s3 sync` for `web/dist` (to `WebBucket`) and `catalog/` (to `DataBucket` under `catalog/`), then creates a CloudFront invalidation. This replaces the CDK `BucketDeployment`.
 
@@ -498,7 +599,8 @@ The module contains:
 
 - Cognito user pool (email sign-in, verified email required), user pool client (PKCE, Hosted UI domain).
 - API Gateway HTTP API with a Cognito JWT authorizer attached to every route, and CORS limited to the CloudFront domain. The route list matches `services/api/src/routes.ts`.
-- 7 Lambda functions (Node.js 20, arm64) from the zips above, each with its own log group, `aws_lambda_permission` for API Gateway (and for the scheduler on reminder-fn), the env vars `TABLE_NAME`, `CATALOG_VERSION`, `ENABLED_CHECKS`, `MODEL_ID`, `TOPIC_ARN`, a 10 s timeout on explain-fn and 20 s on checks-fn. Each function gets its own IAM role with an inline policy scoped to exact ARNs (Req 25.3):
+- 8 Lambda functions (Node.js 20, arm64) from the zips above, each with its own log group, `aws_lambda_permission` for API Gateway (and for the scheduler on reminder-fn), the env vars `TABLE_NAME`, `CATALOG_VERSION`, `ENABLED_CHECKS`, `MODEL_ID`, `TOPIC_ARN`, a 10 s timeout on explain-fn and drafts-fn and 20 s on checks-fn. The per-function IAM roles are listed after the drafting changes below.
+- Drafting changes (Req 22): in `terraform/api.tf`, `"drafts"` is added to `local.function_keys`, `local.functions` gets `drafts = { timeout = 10, env = merge(local.base_env, { MODEL_ID = var.model_id }) }` (`base_env` already holds `TABLE_NAME` and `GSI1_NAME`), and `local.routes` gets `"POST /trips/{tripId}/drafts" = "drafts"`, which puts drafts in `api_functions` and so creates the API integration, route with the JWT authorizer, and Lambda permission. In `terraform/iam.tf`, the per-function policy map gets a `drafts` entry using the existing `local.model_arn`. `'drafts'` is added to the `FUNCTIONS` list in `scripts/build-lambdas.mjs` so `dist/lambda/drafts.zip` is built. Each function gets its own IAM role with an inline policy scoped to exact ARNs (Req 25.3):
 
 | Function | Allowed actions (resources) |
 |---|---|
@@ -509,6 +611,7 @@ The module contains:
 | checks-fn | `dynamodb:GetItem, PutItem, Query` (table); `s3:GetObject` (`catalog/*`); `lambda:InvokeFunction` (explain-fn); `sns:Publish` (topic) |
 | explain-fn | `dynamodb:GetItem, UpdateItem` (table); `bedrock:InvokeModel` (one model ARN) |
 | reminder-fn | `dynamodb:GetItem, Query` (table); `sns:Publish` (topic) |
+| drafts-fn | `dynamodb:GetItem, Query` (table only; it reads META, CONSTRAINTS, MEMBER and ScratchPad items by `PK`); `bedrock:InvokeModel` (one model ARN). No write actions |
 
 All roles also get `logs:CreateLogStream, PutLogEvents` on their own log group. The scheduler role only gets `lambda:InvokeFunction` on reminder-fn.
 
@@ -519,7 +622,7 @@ All roles also get `logs:CreateLogStream, PutLogEvents` on their own log group. 
 
 Checks that replace the removed CDK assertion tests: `terraform fmt -check` and `terraform validate` pass; `services/api/src/routes.test.ts` compares the route table in `services/api/src/routes.ts` with the routes declared in `terraform/` so every route exists and has the authorizer; and the IAM policies in `terraform/` list exact resource ARNs (no `"*"` except where AWS requires it).
 
-### 12. Web UI design (Req 2, 3, 5–11, 13, 19–21, 23)
+### 12. Web UI design (Req 2, 3, 5–11, 13, 19–23)
 
 The web app in `web/` uses React 18, Vite, and plain CSS. No UI or CSS libraries are added. The UI rework changes presentation only: backend APIs, the API modules in `web/src/api/*.ts`, component props used by other components, and component behavior stay the same.
 
@@ -556,6 +659,15 @@ The web app in `web/` uses React 18, Vite, and plain CSS. No UI or CSS libraries
 **Overview tab (`TripOverview.tsx`).** A dashboard of cards built from data the page already loads: the selected stay; budget used versus limit from the latest Check_Result's Cost outcome (ProgressBar); the Feasibility_Score as a ScoreRing with its label; checklist done/total; groceries purchased/total; the next itinerary stops; and quick actions (add item, run checks, invite). Each card falls back to an EmptyState-style prompt when its data is missing.
 
 **Section screens.** Items render as cards instead of tables. "Add" and "Edit" open a Drawer form that keeps the existing validators and inline field errors. Checkboxes (checklist done, grocery purchased) toggle inline. Member display names replace Member IDs. Each section has an EmptyState. Deletes go through ConfirmDialog. Toasts confirm save and delete, and a version conflict shows a toast plus the existing stale-conflict reload prompt (Req 23.3). `lastModified` stays visible on each card (Req 5.7). Lodging shows stay cards, a catalog picker as cards with "Estimated as of <date>" labels, a Selected badge, and confirmation upload and download (Req 6.1, 12). Itinerary renders as a day-by-day timeline (Req 7.4). Groceries and Checklist keep their fields and toggles (Req 8.1, 9.1). Expenses keeps no payment controls (Req 10.3). Constraints keeps its form and validation, laid out as grouped cards (Req 11.1).
+
+**Scratch pad drafting (`GenericSection.tsx`, Req 22.1, 22.2, 22.18, 22.21–22.23, 22.25).** When `section === 'ScratchPad'`, `GenericSection` adds a "Draft with AI" card above the item list. Each ScratchPad item card gets a `Checkbox` ("Use for drafting"), and the card has a "Draft from notes" `TextInput` (textarea) with a live character count against 4,000 and a primary `Button` "Create drafts". The button is disabled until at least one item is selected or the textarea has text, and it shows its loading state while the request runs. The new module `web/src/api/drafts.ts` exports `createDrafts(client, tripId, { itemIds?, notes? }): Promise<DraftItem[]>` and reuses `client.ts` error handling. Results open in a `Drawer` titled "Drafts" with draft `Card`s grouped by Section. Each card shows a Section `Badge`, the field values (Member IDs rendered as display names), a "Suggested: <name>" line for `suggestedClaimedBy`, the field errors inline, and an "Invalid" `Badge` when `valid` is false. Each card has these controls:
+
+- **Edit** opens the Section's existing add form (`Itinerary.tsx`, `Groceries.tsx`, `Checklist.tsx`, or the generic form) prefilled with `draft.fields`, in a mode where submit updates the local draft instead of saving. The App then re-runs `validatePlanItem` from `packages/shared` to refresh `valid` and `errors`.
+- **Accept** calls the existing `createItem` in `web/src/api/items.ts`. On 201 the card is removed and a toast says "Added to <Section>". On 400 the card stays with the returned field errors (Req 22.21).
+- **Discard** removes the card locally. No request is sent (Req 22.22).
+- **Accept all valid** saves every draft with `valid === true` and no errors, one at a time. Invalid drafts stay in the list, and the toast reports "N added, M need fixes" (Req 22.23).
+
+On a 502 or network error the Drawer is not opened. An error toast and an inline message say "Drafts could not be created. Try again in a moment.", and the selected items and textarea text are left unchanged (Req 22.25). A 400 shows the returned message under the textarea. Drafts live only in component state and are lost on reload, which is acceptable because nothing was saved.
 
 **Checks (`ChecksPanel.tsx`, `AlternativeView.tsx`).** A large Feasible / Not feasible banner with the ScoreRing (Req 19.2–19.4); one card per check with a measured-versus-limit bar and unit-aware formatting from `format.ts` (currency, people, nights, minutes), failed checks listed first; the Bedrock explanation in a highlighted box with a source Badge (Bedrock or template) (Req 21.6); history as a compact newest-first list (Req 13.6); and alternatives as side-by-side cards (Req 20.3).
 
@@ -621,6 +733,9 @@ export interface CheckResult { tripId: string; checkId: string; runAt: string;
 | Missing Lodging or constraints; unknown activity; no base result for alternative | 422 `{ error: 'MISSING_INPUT' \| 'UNKNOWN_ACTIVITY' \| 'NO_BASE_RESULT', ... }` | Req 13.5, 20.1 |
 | Catalog fails schema | 500 `{ error: 'CATALOG_INVALID', version }`, errors logged | Req 12.5 |
 | Bedrock error, timeout, or ungrounded text | Template explanation stored, fallback metric emitted | Req 21.4, 21.5 |
+| Draft_Notes empty or over 4,000 characters, or unknown ScratchPad itemId | 400 `{ error: 'VALIDATION', fields: [{ field: 'notes' \| 'itemIds', message }] }`, Bedrock not called | Req 22.4 |
+| Draft Bedrock error, model access denied, 8 s timeout, or unparseable output | 502 `{ error: 'DRAFT_FAILED', reason: 'BEDROCK_ERROR' \| 'MODEL_ACCESS_DENIED' \| 'TIMEOUT' \| 'UNPARSEABLE' }`, no writes, `DRAFT_FAILED` logged | Req 22.24, 22.26 |
+| Accepted draft fails validation on save | 400 `{ error: 'VALIDATION', fields }` from the existing create-item route | Req 22.20 |
 | SNS publish failure | Logged; the originating operation still returns success | Req 24.4 |
 | Scheduler failure | Logged with `event: 'SCHEDULE_FAILED'`; trip save still succeeds | Req 24.2 (best effort) |
 | Unexpected exception | 500 `{ error: 'INTERNAL', requestId }`; stack logged after redaction | Req 26.1 |
@@ -849,6 +964,32 @@ Consolidation notes: the per-section validation criteria (6.2, 6.3, 7.2, 7.3, 8.
 
 **Validates: Requirements 25.6**
 
+Drafting consolidation notes: 22.5 and 22.6 are one whitelist property. Parsing, section filtering, and the 20-item cap (22.8–22.10) are one pipeline property. Name resolution and cost grounding (22.11–22.14) are one field-preparation property. Validation status and no-writes (22.15–22.17) are one property. The guard (22.3) is already covered by Property 6 because the drafts route is in `allRoutes`, and accept-time stamping and validation (22.19, 22.20) are covered by Properties 8 and 11 because accept reuses the create route.
+
+### Property 37: Draft prompt contains only whitelisted data
+
+*For any* Trip, constraints, Members (with random emails, user IDs, and display names), Lodging items with random door codes, confirmation numbers, and check-in details, random token strings, and Draft_Notes that contain none of those secret strings, the `system` and `user` text of `buildDraftPrompt` built from the handler's projection contains the notes, the trip dates, the destination, and every Member display name, and contains none of the emails, user IDs, door codes, confirmation numbers, check-in details, or tokens.
+
+**Validates: Requirements 22.5, 22.6**
+
+### Property 38: Draft parsing keeps the first 20 items in Drafting_Sections
+
+*For any* list of `{ section, fields }` entries whose sections are drawn from all 8 Sections plus random strings, serialized as JSON and optionally wrapped in a Markdown code fence and surrounding prose, `parseDraftResponse` returns `ok: true` with the same entries, and `filterDraftSections(...).slice(0, 20)` equals the first `min(20, k)` entries whose section is a Drafting_Section, in their original order.
+
+**Validates: Requirements 22.8, 22.9, 22.10**
+
+### Property 39: Prepared drafts keep only resolved people and grounded costs
+
+*For any* Member list (including duplicate display names that differ only by case), Draft_Notes, and draft with person fields and `costCents`/`amount` fields, after preparation: a person field holds a user ID if and only if exactly one Member's display name matches the named person case-insensitively after trimming, and that ID is that Member's; otherwise the field is absent. A cost or amount field is present if and only if its value (or, for `costCents`, its value / 100) is in `extractNumbers(notes)`. Every other field is unchanged.
+
+**Validates: Requirements 22.11, 22.12, 22.13, 22.14**
+
+### Property 40: Draft validity matches the Section validator and nothing is stored
+
+*For any* Trip, Member set, and Bedrock output in Drafting_Sections (valid fields, fields corrupted as in Property 11, and Itinerary days inside and outside the trip range), every returned DraftItem has `valid` equal to `validatePlanItem(section, fields, ctx).ok` and `errors` equal to its error list (empty when valid). After the drafts handler runs on an in-memory store, the set of stored items is deeply equal to the set before the request.
+
+**Validates: Requirements 22.15, 22.16, 22.17**
+
 ## Testing Strategy
 
 All tests run with one non-watch command, `npx vitest --run`, configured through `vitest.workspace.ts` (Req 28.4).
@@ -863,7 +1004,7 @@ All tests run with one non-watch command, `npx vitest --run`, configured through
   - `arbConstraints`, `arbCatalog` (≥ 3 stays, ≥ 5 activities, place names that may contain digits), `arbStay`, and `arbItinerary` (days within range, `HH:mm` times, repeated stop names).
   - `arbEngineInput`, which ties these together so planned activity IDs exist in the catalog.
 - Edge cases the generators must cover: zero-night overlap, lodging that starts before or ends after the trip, a single-night trip, traveler count 1, budget exactly equal to cost, empty transport and activity lists, empty required features, days with 0 or 1 stops, same-name consecutive stops, whitespace-only names, amounts like `0.001`, `1.5`, and `0`, and Unicode file names.
-- Properties 1–23 and 28–36 test pure functions directly. Properties 2, 3, 6, 7, 9, 16, 22, and 29 run handlers against in-memory repository fakes that implement the same interfaces as the DynamoDB adapters.
+- Properties 1–23 and 28–39 test pure functions directly. Properties 2, 3, 6, 7, 9, 16, 22, 29, and 40 run handlers against in-memory repository fakes that implement the same interfaces as the DynamoDB adapters.
 - Engine package coverage (Req 28.1): Properties 23–28 cover the Cost, Capacity, Dates, Schedule, and Preferences checks and the Feasibility_Score.
 
 ### Unit and example tests (vitest)
@@ -871,6 +1012,8 @@ All tests run with one non-watch command, `npx vitest --run`, configured through
 - The Membership_Guard route-table test iterates every `/trips/{tripId}/*` route and asserts 403 with a non-member fake (Req 28.2).
 - Grounding examples (Req 28.3) include `"$2,850.00"`, `"2850"`, `"75%"`, a template explanation, and a Bedrock text with a computed difference (`"$350 over"`, which must be rejected).
 - `explain-fn` is tested with mocked Bedrock (`aws-sdk-client-mock`) for success, error, and a timeout simulated with fake timers (Req 21.5, 21.6). The mock also asserts that the prompt includes the "use only numbers" instruction (Req 21.2).
+- drafts-fn is tested with mocked Bedrock: `modelId` equals `MODEL_ID`, `temperature: 0`, and the JSON instruction is in the prompt (22.7, 22.8); empty, 4,000-character, and 4,001-character notes and an unknown itemId (400, Bedrock not called, 22.4); `AccessDeniedException`, a generic error, an 8 s timeout with fake timers, and non-JSON output each give 502 with the matching `reason`, a `DRAFT_FAILED` log line, and no writes (22.24, 22.26); log output never contains the notes text (22.27); and `DraftRequestCount`/`DraftItemCount` are emitted (22.28, 22.29).
+- React Testing Library tests for drafting cover: selected items and textarea text sent in the request (22.1, 22.2); draft cards with Section, fields, errors, and controls (22.18); Accept calling the create-item API, with a 400 keeping the card and its errors (22.19, 22.21); Discard sending no request (22.22); "Accept all valid" saving only valid drafts (22.23); and the error message with notes kept (22.25).
 - SNS publish failure leaves a 201 response (Req 24.4). Bedrock fallback and engine runs emit metrics (Req 26.2, 26.3). One structured log line is written per request (Req 26.1).
 - 422 cases cover a missing lodging, missing constraints, an unknown activity, and an alternative with no base result (Req 13.5). A presigned URL `expiresIn ≤ 900` test covers Req 6.5.
 - React Testing Library tests cover: the RequireAuth gate (1.1); the apiClient header (1.2); lastModified display (5.7); the generic CRUD screens (5.8); section forms (6.1, 7.1, 8.1, 9.1, 10.1); no payment controls in Expenses (10.3); outcome table and label rendering (19.3, 19.4); the side-by-side alternative view (20.3); and fetch on load (23.1).

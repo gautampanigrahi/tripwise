@@ -1081,6 +1081,73 @@
         "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
         "timestamp": 1795583032517
       }
+    ],
+    "21.1 Implement the pure drafting helpers in `packages/grounding`": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795587692381
+      },
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795588191802
+      }
+    ],
+    "21.3 Implement the drafts handler and wire its route": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795588192793
+      },
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589424395
+      }
+    ],
+    "21.4 Add drafts-fn to Terraform and the Lambda build": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795588193832
+      },
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589425418
+      }
+    ],
+    "21.5 Implement the \"Draft with AI\" UI on the Scratch pad tab": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795588194414
+      },
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589426744
+      }
+    ],
+    "21.6 Checkpoint - Drafting builds, validates, and all tests pass": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589427249
+      },
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589521888
+      }
+    ],
+    "21. Implement scratch pad drafting with Bedrock": [
+      {
+        "executionId": "6d729040-34c5-48f1-9400-6701ae9a2af5",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795589521930
+      }
     ]
   }
 }

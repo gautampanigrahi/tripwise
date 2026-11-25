@@ -3,6 +3,7 @@ import type { Catalog, ChecklistItem, ItineraryItem, LodgingItem } from "@tripwi
 import { useApiClient } from "../api/ApiClientContext";
 import { getCatalog } from "../api/catalog";
 import { ApiError } from "../api/client";
+import { useCurrentUser } from "../auth/user";
 import { describeApiError, inviteMember, loadTripPage, type TripPageData } from "../api/trips";
 import { ChecksPanel } from "../checks/ChecksPanel";
 import { Link, tripPath } from "../router";
@@ -58,6 +59,7 @@ const NEEDS_CATALOG: ReadonlySet<Tab> = new Set<Tab>(["Lodging", "Constraints", 
  */
 export function TripPage({ tripId }: { tripId: string }) {
   const client = useApiClient();
+  const currentUser = useCurrentUser();
   const [data, setData] = useState<TripPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -216,6 +218,8 @@ export function TripPage({ tripId }: { tripId: string }) {
             items={itemsBySection[tab] as unknown as GenericItem[]}
             members={members}
             onChanged={onChanged}
+            trip={{ startDate: trip.startDate, endDate: trip.endDate }}
+            currentUserId={currentUser?.userId ?? undefined}
           />
         );
       case "Constraints":

@@ -1,9 +1,12 @@
 /** Replacement written in place of every secret value. */
 export const REDACTED = '[REDACTED]';
 
-/** Keys whose values never reach CloudWatch (Req 25.6). Matched case-insensitively. */
+/**
+ * Keys whose values never reach CloudWatch (Req 25.6, 22.27). Matched case-insensitively. Covers
+ * secrets plus Draft_Notes and Bedrock prompt/response payloads (`system`, `messages`, `output`).
+ */
 export const REDACTED_KEY_RE =
-  /^(doorcode|confirmationnumber|authorization|idtoken|accesstoken|token|checkindetails)$/i;
+  /^(doorcode|confirmationnumber|authorization|idtoken|accesstoken|token|checkindetails|notes|draftnotes|prompt|system|messages|output)$/i;
 
 /**
  * Pure deep copy of `value` with the value of every secret key, at any depth and inside arrays,

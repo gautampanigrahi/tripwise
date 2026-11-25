@@ -1,12 +1,12 @@
 # TripWise_API: HTTP API with a Cognito JWT authorizer on every route (Req 1.3), and the
-# seven Lambda functions. The zips come from `npm run build:lambdas` (dist/lambda/<name>.zip),
+# eight Lambda functions. The zips come from `npm run build:lambdas` (dist/lambda/<name>.zip),
 # which must run before `terraform plan`/`apply` (filebase64sha256 reads them at plan time).
 
 locals {
   reminder_schedule_prefix = "trip-reminder-"
 
   # Static key list (not keys(local.functions)) so names/ARNs can be used inside local.functions.
-  function_keys  = ["trips", "invites", "items", "catalog", "checks", "explain", "reminder"]
+  function_keys  = ["trips", "invites", "items", "catalog", "checks", "explain", "reminder", "drafts"]
   function_names = { for k in local.function_keys : k => "${var.project}-${k}-${local.suffix}" }
 
   base_env = {
@@ -61,6 +61,11 @@ locals {
       timeout = 10
       env     = merge(local.base_env, { TOPIC_ARN = aws_sns_topic.notifications.arn })
     }
+    # Req 22.24: drafts-fn calls Bedrock with an 8 s abort inside a 10 s Lambda timeout.
+    drafts = {
+      timeout = 10
+      env     = merge(local.base_env, { MODEL_ID = var.model_id })
+    }
   }
 
   # Every HTTP route (matches services/api/src/routes.ts): route key => function.
@@ -83,6 +88,7 @@ locals {
     "POST /trips/{tripId}/checks"                                  = "checks"
     "POST /trips/{tripId}/checks/alternatives"                     = "checks"
     "GET /trips/{tripId}/checks"                                   = "checks"
+    "POST /trips/{tripId}/drafts"                                  = "drafts"
   }
 
   api_functions = toset(distinct(values(local.routes)))

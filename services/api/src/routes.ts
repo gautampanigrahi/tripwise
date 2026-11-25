@@ -1,12 +1,13 @@
 import type { RouteDef } from './lib/routes.js';
 import { routes as checksRoutes } from './handlers/checks.js';
+import { routes as draftsRoutes } from './handlers/drafts.js';
 import { routes as invitesRoutes } from './handlers/invites.js';
 import { routes as itemsRoutes } from './handlers/items.js';
 import { routes as tripsRoutes } from './handlers/trips.js';
 
 /** One API Gateway route: its key, the Lambda (handler file) serving it, and its Membership_Guard action. */
 export interface RouteEntry extends Pick<RouteDef, 'routeKey' | 'guard'> {
-  fn: 'trips' | 'invites' | 'items' | 'checks' | 'catalog';
+  fn: 'trips' | 'invites' | 'items' | 'checks' | 'drafts' | 'catalog';
 }
 
 const entries = (fn: RouteEntry['fn'], defs: Array<Pick<RouteDef, 'routeKey' | 'guard'>>): RouteEntry[] =>
@@ -21,5 +22,6 @@ export const allRoutes: RouteEntry[] = [
   ...entries('invites', invitesRoutes),
   ...entries('items', itemsRoutes),
   ...entries('checks', checksRoutes),
+  ...entries('drafts', draftsRoutes),
   { routeKey: 'GET /catalog', guard: null, fn: 'catalog' },
 ];

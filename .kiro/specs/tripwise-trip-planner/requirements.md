@@ -10,10 +10,10 @@ The project is a four-week build stored in a private GitHub repository shared wi
 
 The user skipped the clarifying questions, so these defaults apply:
 
-1. **Stack**: TypeScript on Node.js AWS Lambda; AWS CDK (TypeScript) for infrastructure; React single-page app built with Vite for the frontend; fast-check for property-based tests. Code and examples are written in TypeScript, not pseudocode.
+1. **Stack**: TypeScript on Node.js AWS Lambda; Terraform for infrastructure; React single-page app built with Vite for the frontend; fast-check for property-based tests. Code and examples are written in TypeScript, not pseudocode.
 2. **Section depth**: Lodging, Itinerary, Groceries, and Checklist get section-specific fields and UI. Transportation, Reservations, Expenses, and Scratch pad use the same generic Plan_Item model with basic create, read, update, and delete.
 3. **Checks**: Cost, Capacity, and Dates are required. Schedule and Preferences are optional extensions. The Feasibility_Score is the share of executed Checks that passed, shown with a label. Alternatives are produced by re-running the same Checks against a different Catalog stay.
-4. **Bedrock scope**: The main Bedrock task is explaining a Check_Result, grounded only in stored check values. Scratch-pad drafting and trip summary are optional.
+4. **Bedrock scope**: The main Bedrock task is explaining a Check_Result, grounded only in stored check values. The second Bedrock task turns Scratch pad notes into editable Draft_Items (Requirement 22). A Bedrock trip summary is not being built.
 5. **Updates**: Members see other Members' changes after reloading. Live push over WebSocket is out of scope for the MVP.
 6. **Notifications**: Amazon SNS sends invite and check-result alerts. Amazon EventBridge Scheduler sends one pre-trip reminder; this part may be minimal.
 7. **Demo data**: San Diego is the demo city, with a few stays and activities. The Catalog is versioned JSON in S3, and every price in it is labeled as a dated estimate.
@@ -51,6 +51,9 @@ Flight booking, payment processing or money transfer, global hotel search, and r
 - **Check_Result**: A saved record of one Feasibility_Engine run: Trip ID, run timestamp, the stay evaluated, Catalog version, the list of Check_Outcomes, the Feasibility_Score, and the explanation text.
 - **Feasibility_Score**: The number of passed Check_Outcomes divided by the number of executed Check_Outcomes in a Check_Result, shown as a percentage with a label.
 - **Alternative**: A Check_Result produced by running the same Checks against a different Catalog stay without changing the saved plan.
+- **Draft_Notes**: The text a Member submits for drafting: the text of the selected ScratchPad Plan_Items or the text typed into the "Draft from notes" box on the Scratch pad tab.
+- **Drafting_Section**: A Section that drafting may produce. Valid values: Itinerary, Groceries, Checklist, Reservations, Transportation.
+- **Draft_Item**: An unsaved, editable proposal for one Plan_Item in a Drafting_Section, produced from Draft_Notes by Amazon Bedrock and returned by the TripWise_API with a valid or invalid status and any field errors.
 - **Required_Feature**: A stay attribute named in Trip_Constraints preferences (for example, "parking" or "step-free entry") that must be true for the stay.
 
 ## Requirements
@@ -295,15 +298,41 @@ Flight booking, payment processing or money transfer, global hotel search, and r
 5. IF the Amazon Bedrock call fails or exceeds 10 seconds, THEN THE Explanation_Service SHALL store a template explanation built from the Check_Outcomes and log the failure to CloudWatch.
 6. WHEN an explanation is stored, THE TripWise_API SHALL save the explanation text and its source (Bedrock or template) on the Check_Result.
 
-### Requirement 22: Optional Bedrock Drafting (Optional Extension)
+### Requirement 22: Scratch Pad Drafting with Bedrock
 
-**User Story:** As a Member, I want help drafting notes and a trip summary, so that writing up the plan takes less effort.
+**User Story:** As a Member, I want to turn rough Scratch pad notes into draft Plan_Items that I can review, so that filling in the plan takes less typing without anything being saved behind my back.
 
 #### Acceptance Criteria
 
-1. WHERE scratch-pad drafting is enabled, WHEN a Member requests a draft for a ScratchPad Plan_Item, THE Explanation_Service SHALL return Bedrock draft text that the Member can edit before saving.
-2. WHERE trip summary is enabled, WHEN a Member requests a trip summary, THE Explanation_Service SHALL send Amazon Bedrock only the stored Plan_Items and the latest Check_Result for that Trip.
-3. WHERE trip summary is enabled, IF the summary text contains a price, sleeps count, or availability statement absent from the supplied Plan_Items and Check_Result, THEN THE Explanation_Service SHALL discard the summary and return an error message to the Member.
+1. WHEN a Member selects one or more ScratchPad Plan_Items on the Scratch pad tab and requests drafts, THE TripWise_App SHALL send the text of the selected ScratchPad Plan_Items to the TripWise_API as Draft_Notes.
+2. WHEN a Member enters text in the "Draft from notes" box on the Scratch pad tab and requests drafts, THE TripWise_App SHALL send the entered text to the TripWise_API as Draft_Notes.
+3. WHEN the TripWise_API receives a draft request, THE Membership_Guard SHALL treat the draft request as a write action and confirm, according to Requirement 4, that the caller is a Member of the Trip before the TripWise_API reads Trip data or calls Amazon Bedrock.
+4. IF the Draft_Notes are empty or longer than 4,000 characters, THEN THE TripWise_API SHALL reject the draft request with HTTP status 400 and a message naming the Draft_Notes limit, without calling Amazon Bedrock.
+5. WHEN the TripWise_API sends a draft request to Amazon Bedrock, THE TripWise_API SHALL include only the Draft_Notes, the Trip start date, the Trip end date, the Trip destination, the traveler count, the display names of the Trip's Members, and the list of Drafting_Sections with their field names.
+6. THE TripWise_API SHALL exclude door codes, confirmation numbers, check-in details, identity tokens, email addresses, and user IDs from every Amazon Bedrock draft request.
+7. THE TripWise_API SHALL call the Amazon Nova Lite model identified by the existing MODEL_ID environment variable for draft requests.
+8. THE TripWise_API SHALL instruct Amazon Bedrock to return Draft_Items as JSON, with each Draft_Item naming one Drafting_Section and that Section's fields.
+9. WHEN Amazon Bedrock returns Draft_Items, THE TripWise_API SHALL drop every Draft_Item whose Section is not a Drafting_Section.
+10. IF Amazon Bedrock returns more than 20 Draft_Items for one draft request, THEN THE TripWise_API SHALL keep the first 20 Draft_Items and drop the rest.
+11. WHEN a Draft_Item names a responsible Member, claimed-by Member, or payer by display name, THE TripWise_API SHALL replace the display name with the user ID of the one Member whose display name matches.
+12. IF a person named in a Draft_Item matches no Member display name or more than one Member display name, THEN THE TripWise_API SHALL leave that Draft_Item field unassigned.
+13. WHEN a Draft_Item contains a cost or amount field, THE TripWise_API SHALL check that the amount appears among the numbers extracted from the Draft_Notes using the number-extraction method of Requirement 21.3.
+14. IF a Draft_Item cost or amount does not appear among the numbers extracted from the Draft_Notes, THEN THE TripWise_API SHALL remove that cost or amount field from the Draft_Item.
+15. WHEN the TripWise_API has prepared the Draft_Items, THE TripWise_API SHALL validate each Draft_Item with the same Section validation schema used for manually created Plan_Items in Requirements 5 through 9, including the Itinerary day range against the Trip dates.
+16. IF a Draft_Item fails Section validation, THEN THE TripWise_API SHALL return the Draft_Item marked invalid with each invalid field and its error message.
+17. WHEN the TripWise_API returns Draft_Items, THE TripWise_API SHALL return the Draft_Items to the TripWise_App without storing any Plan_Item.
+18. WHEN the TripWise_App receives Draft_Items, THE TripWise_App SHALL display each Draft_Item with its Section, its fields, its field errors, and edit, accept, and discard controls.
+19. WHEN a Member accepts a Draft_Item, THE TripWise_API SHALL store the Draft_Item as a Plan_Item according to Requirement 5.1, with lastModifiedBy set to the accepting Member's user ID.
+20. IF an accepted Draft_Item fails Section validation when saved, THEN THE TripWise_API SHALL reject the save with HTTP status 400 and list each invalid field.
+21. IF the TripWise_API rejects the save of an accepted Draft_Item, THEN THE TripWise_App SHALL keep the Draft_Item displayed with the returned field errors.
+22. WHEN a Member discards a Draft_Item, THE TripWise_App SHALL remove the Draft_Item from the draft list without storing a Plan_Item.
+23. WHEN a Member selects "Accept all valid", THE TripWise_App SHALL save every Draft_Item that has no field errors as a Plan_Item and keep every invalid Draft_Item in the draft list.
+24. IF the Amazon Bedrock draft call fails, is denied model access (including the Free-plan Marketplace restriction on Amazon Nova Lite documented in the design), takes longer than 8 seconds, or returns output that does not parse as Draft_Item JSON, THEN THE TripWise_API SHALL return HTTP status 502 with an error code and store no Plan_Item.
+25. WHEN the TripWise_App receives a draft error, THE TripWise_App SHALL show a message stating that drafts could not be created and keep the Draft_Notes unchanged.
+26. IF a draft request fails, THEN THE TripWise_API SHALL write a CloudWatch log entry with event DRAFT_FAILED and the failure reason (Bedrock error, model access denied, timeout, or unparseable output).
+27. THE TripWise_API SHALL redact the Draft_Notes, the Bedrock prompt, and the Bedrock response from CloudWatch log entries.
+28. WHEN the TripWise_API receives a draft request, THE TripWise_API SHALL add 1 to the CloudWatch DraftRequestCount metric.
+29. WHEN the TripWise_API returns Draft_Items, THE TripWise_API SHALL add the number of returned Draft_Items to the CloudWatch DraftItemCount metric.
 
 ### Requirement 23: Shared Updates on Reload
 
@@ -332,9 +361,9 @@ Flight booking, payment processing or money transfer, global hotel search, and r
 
 #### Acceptance Criteria
 
-1. THE TripWise_API SHALL run in a single AWS Region defined in the AWS CDK application.
-2. THE AWS CDK application SHALL define every AWS resource used by TripWise, including Cognito, API Gateway, Lambda, DynamoDB, S3, SNS, EventBridge Scheduler, IAM roles, and CloudWatch alarms.
-3. THE AWS CDK application SHALL assign each Lambda function its own IAM role granting only the actions and resource ARNs that function uses.
+1. THE TripWise_API SHALL run in a single AWS Region defined in the Terraform configuration.
+2. THE Terraform configuration SHALL define every AWS resource used by TripWise, including Cognito, API Gateway, Lambda, DynamoDB, S3, SNS, EventBridge Scheduler, IAM roles, and CloudWatch alarms.
+3. THE Terraform configuration SHALL assign each Lambda function its own IAM role granting only the actions and resource ARNs that function uses.
 4. THE File_Store SHALL block all public access on the confirmation-file and Catalog prefixes and serve the web app through Amazon CloudFront with origin access control.
 5. THE File_Store and Plan_Store SHALL encrypt stored data at rest.
 6. THE TripWise_API SHALL omit door codes, confirmation numbers, and identity tokens from CloudWatch log entries.

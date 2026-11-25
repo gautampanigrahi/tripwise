@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
-    "@tripwise/shared": "*"
+    "@tripwise/shared": "*",
+    "zod": "^4.6.7"
   }
 }
