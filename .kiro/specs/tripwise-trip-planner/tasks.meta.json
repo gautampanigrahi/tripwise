@@ -966,6 +966,18 @@
         "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
         "timestamp": 1795569602525
       }
+    ],
+    "19. Switch the Bedrock model to Amazon Nova Lite": [
+      {
+        "executionId": "e796164d-6851-45b3-a7a3-2bfbe10b993c",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795574623102
+      },
+      {
+        "executionId": "e796164d-6851-45b3-a7a3-2bfbe10b993c",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795574674300
+      }
     ]
   }
 }

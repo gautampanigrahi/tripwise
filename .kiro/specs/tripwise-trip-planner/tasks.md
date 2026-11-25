@@ -440,6 +440,12 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
   - Add `className`s to existing components only where needed for the styles; no behavior changes
   - _Requirements: 5.7, 19.2, 19.3, 19.4, 20.3, 23.3_
 
+- [x] 19. Switch the Bedrock model to Amazon Nova Lite
+  - Set the `model_id` default in `terraform/variables.tf` to `amazon.nova-lite-v1:0` (the explain-fn IAM permission in `terraform/iam.tf` is derived from it)
+  - Confirm `services/api/src/handlers/explain.ts` Converse request works with Nova (system prompt, temperature 0, maxTokens 300) and update test fixtures/defaults that still reference the Claude model ID
+  - Replace remaining Claude model references in code and scripts (not spec docs) with the Nova Lite ID
+  - _Requirements: 21.1, 21.2, 25.3_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
@@ -450,6 +456,7 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
 - Task 17 replaces the CDK app in `infra/` (tasks 5.1, 5.2, 11.11) with Terraform in `terraform/`. `cdk bootstrap` is no longer needed. Deploy with `scripts/deploy.sh`, which needs the AWS CLI, Terraform, and credentials for the target account. References to `infra/` in tasks 15.7 and 15.8 now mean the equivalent files in `terraform/`.
 - Task 17 does not depend on tasks 15.x or 16. In the dependency graph its waves (15–18) run right after checkpoint 14 and before the remaining 15.x tasks and checkpoint 16.
 - Task 18 is listed after task 17 but runs in wave 20, after task 15.1 (both touch `web/src/pages/TripPage.tsx` and section components) and before checkpoint 16. Task 15.8 also edits `web/src/sections/GenericSection.tsx`, so it stays in wave 21, after task 18.
+- Task 19 switches the Bedrock model from Anthropic Claude to Amazon Nova Lite (`amazon.nova-lite-v1:0`, on-demand in us-west-2) because the AWS Free plan cannot create the AWS Marketplace agreements Claude models require. It depends only on task 18. It sits alone in final wave 23 for ordering; it does not need tasks 15.7, 15.8, or checkpoint 16 to be done.
 
 ## Task Dependency Graph
 
@@ -478,7 +485,8 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 19, "tasks": ["15.1", "15.3", "15.7"] },
     { "id": 20, "tasks": ["15.2", "15.4", "15.5", "18"] },
     { "id": 21, "tasks": ["15.6", "15.8"] },
-    { "id": 22, "tasks": ["16"] }
+    { "id": 22, "tasks": ["16"] },
+    { "id": 23, "tasks": ["19"] }
   ]
 }
 ```

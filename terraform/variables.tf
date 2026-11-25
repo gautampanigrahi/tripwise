@@ -42,5 +42,5 @@ variable "enabled_checks" {
 variable "model_id" {
   description = "Bedrock model ID used by explain-fn (MODEL_ID)."
   type        = string
-  default     = "anthropic.claude-3-haiku-20240307-v1:0"
+  default     = "amazon.nova-lite-v1:0"
 }
