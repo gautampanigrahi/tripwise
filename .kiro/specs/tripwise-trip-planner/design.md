@@ -519,6 +519,48 @@ All roles also get `logs:CreateLogStream, PutLogEvents` on their own log group. 
 
 Checks that replace the removed CDK assertion tests: `terraform fmt -check` and `terraform validate` pass; `services/api/src/routes.test.ts` compares the route table in `services/api/src/routes.ts` with the routes declared in `terraform/` so every route exists and has the authorizer; and the IAM policies in `terraform/` list exact resource ARNs (no `"*"` except where AWS requires it).
 
+### 12. Web UI design (Req 2, 3, 5–11, 13, 19–21, 23)
+
+The web app in `web/` uses React 18, Vite, and plain CSS. No UI or CSS libraries are added. The UI rework changes presentation only: backend APIs, the API modules in `web/src/api/*.ts`, component props used by other components, and component behavior stay the same.
+
+**Design tokens.** `web/src/styles.css` defines CSS custom properties on `:root` and every rule uses them:
+
+- Color: light theme with neutral surface, border, and text scales and one accent color for primary actions, links, and focus rings. Status colors are pass = green, fail = red, warning = amber, each with a soft background variant for badges and banners.
+- Spacing scale (4 px base), radius scale (small, medium, large, pill), shadow scale (card, raised, overlay), and typography (system font stack, a size scale, weights, line heights).
+- A visible `:focus-visible` ring on every interactive element, and a `prefers-reduced-motion: reduce` block that turns off transitions and animations.
+
+**UI primitives in `web/src/ui/`.** Small, typed components with no data fetching:
+
+| Primitive | Purpose |
+|---|---|
+| `Button`, `IconButton` | Variants primary, secondary, ghost, danger; loading and disabled states; `IconButton` requires an `aria-label` |
+| `Card` | Surface with optional header, actions, and footer |
+| `Badge` | Status or label pill (neutral, accent, pass, fail, warning) |
+| `Avatar`, `AvatarStack` | Initials and a stable color derived from a Member's display name; the stack shows the first few and a "+N" count |
+| `ProgressBar` | Value against a max, with a tone (pass, warning, fail) and an accessible label |
+| `ScoreRing` | Circular Feasibility_Score (0–100) with the label in the center |
+| `Dialog`, `ConfirmDialog` | Modal with `role="dialog"`, `aria-modal`, labelled title, focus trap, Escape to close, focus returned to the opener; `ConfirmDialog` asks before destructive actions |
+| `Drawer` | Side panel built on the same focus and Escape handling; used for add and edit forms; full width below 600 px |
+| `ToastProvider`, `useToast` | Mounted once in `main.tsx`; toasts render in an `aria-live="polite"` region (errors use `role="alert"`) and dismiss automatically |
+| `Skeleton` | Loading placeholders for cards, lists, and text |
+| `EmptyState` | Icon, message, and a primary action |
+| `Tabs` | `role="tablist"`/`tab`/`tabpanel` with `aria-selected`, `aria-controls`, and arrow-key navigation |
+| `Field`, `TextInput`, `Select`, `Checkbox` | Label, hint, and inline error wiring (`aria-invalid`, `aria-describedby`) around native inputs |
+
+**App shell.** `main.tsx` and `router.tsx` render a top bar (logo linking to Trips home, the current user's name or email, Sign out) and breadcrumbs (Trips › Trip name › Tab) above the routed page.
+
+**Trips home (`TripsPage.tsx`).** A responsive grid of trip cards showing destination, dates, the caller's Role (Host or Member), member avatars when available, and the latest check status badge when available. A "New trip" button opens a Dialog whose form runs `validateTripInput` before `POST /trips` (Req 2.1, 2.4). With no trips, an EmptyState offers to create one. Skeleton cards show while loading. `AcceptInvite.tsx` shows clear success (link to the trip) and error states.
+
+**Trip page (`TripPage.tsx`).** The header shows trip name, destination, dates, a days-until-start countdown, member avatars, and an Invite button that opens a Dialog with the existing invitation form (Req 3.1). The page still fetches Plan_Items, Trip_Constraints, and the latest Check_Result on load (Req 23.1). Below the header, `Tabs` list Overview first, then Lodging, Itinerary, Groceries, Checklist, Expenses, the generic sections, Constraints, and Checks.
+
+**Overview tab (`TripOverview.tsx`).** A dashboard of cards built from data the page already loads: the selected stay; budget used versus limit from the latest Check_Result's Cost outcome (ProgressBar); the Feasibility_Score as a ScoreRing with its label; checklist done/total; groceries purchased/total; the next itinerary stops; and quick actions (add item, run checks, invite). Each card falls back to an EmptyState-style prompt when its data is missing.
+
+**Section screens.** Items render as cards instead of tables. "Add" and "Edit" open a Drawer form that keeps the existing validators and inline field errors. Checkboxes (checklist done, grocery purchased) toggle inline. Member display names replace Member IDs. Each section has an EmptyState. Deletes go through ConfirmDialog. Toasts confirm save and delete, and a version conflict shows a toast plus the existing stale-conflict reload prompt (Req 23.3). `lastModified` stays visible on each card (Req 5.7). Lodging shows stay cards, a catalog picker as cards with "Estimated as of <date>" labels, a Selected badge, and confirmation upload and download (Req 6.1, 12). Itinerary renders as a day-by-day timeline (Req 7.4). Groceries and Checklist keep their fields and toggles (Req 8.1, 9.1). Expenses keeps no payment controls (Req 10.3). Constraints keeps its form and validation, laid out as grouped cards (Req 11.1).
+
+**Checks (`ChecksPanel.tsx`, `AlternativeView.tsx`).** A large Feasible / Not feasible banner with the ScoreRing (Req 19.2–19.4); one card per check with a measured-versus-limit bar and unit-aware formatting from `format.ts` (currency, people, nights, minutes), failed checks listed first; the Bedrock explanation in a highlighted box with a source Badge (Bedrock or template) (Req 21.6); history as a compact newest-first list (Req 13.6); and alternatives as side-by-side cards (Req 20.3).
+
+**States, layout, and accessibility.** Every data view has a Skeleton loading state and a friendly error state with a Retry action. Layout is responsive down to 360 px wide (cards stack, tabs scroll horizontally, Drawer goes full width). Dialogs, tabs, and toasts carry the ARIA roles above, and all controls are reachable by keyboard with visible focus.
+
 ## Data Models
 
 ### DynamoDB Single Table: `tripwise-table`

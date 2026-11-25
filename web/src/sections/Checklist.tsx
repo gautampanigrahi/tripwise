@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import {
   validatePlanItem,
   type ChecklistFields,
@@ -11,7 +11,19 @@ import { ApiError } from "../api/client";
 import { claimItem, createItem, deleteItem, updateItem } from "../api/items";
 import { LastModified, memberName } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
-import { describeError, errorsFor, Field, type Editing, type MemberOption } from "./planSectionHelpers";
+import { Badge, Button, Card, Checkbox, ConfirmDialog, EmptyState, ProgressBar, TextInput, useToast } from "../ui";
+import {
+  describeError,
+  errorsFor,
+  FormDrawer,
+  ItemActions,
+  MemberChip,
+  SectionHeader,
+  usePendingDelete,
+  type Editing,
+  type MemberOption,
+} from "./planSectionHelpers";
+import "./lists.css";
 
 export interface ChecklistProps {
   tripId: string;
@@ -49,6 +61,8 @@ function alreadyClaimedBy(err: unknown): string | undefined {
 
 export function Checklist({ tripId, items, members, onChanged }: ChecklistProps) {
   const client = useApiClient();
+  const toast = useToast();
+  const formId = useId();
   const [editing, setEditing] = useState<Editing | null>(null);
   const [form, setForm] = useState<ChecklistForm>(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
@@ -58,7 +72,10 @@ export function Checklist({ tripId, items, members, onChanged }: ChecklistProps)
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowMessage, setRowMessage] = useState<{ itemId: string; text: string } | null>(null);
   const [rowStale, setRowStale] = useState<ChecklistItem | null>(null);
+  const pendingDelete = usePendingDelete<ChecklistItem>();
 
+  const doneCount = items.filter((i) => i.fields.done).length;
+  const claimedCount = items.filter((i) => i.fields.claimedBy).length;
   const errorFor = (field: string) => errorsFor(fieldErrors, field);
 
   function resetForm() {
@@ -106,9 +123,11 @@ export function Checklist({ tripId, items, members, onChanged }: ChecklistProps)
         );
         if (!res.ok) {
           setStale(res.current as ChecklistItem);
+          toast.error("Someone else changed this task. Your changes were not saved.");
           return;
         }
       }
+      toast.success(editing.mode === "create" ? "Task added." : "Task saved.");
       resetForm();
       await onChanged();
     } catch (err) {
@@ -127,17 +146,19 @@ export function Checklist({ tripId, items, members, onChanged }: ChecklistProps)
     setRowStale(null);
     try {
       await claimItem(client, tripId, item.itemId);
+      toast.success(`You claimed "${item.fields.task}".`);
       await onChanged();
     } catch (err) {
       const by = alreadyClaimedBy(err);
       if (by !== undefined) {
-        setRowMessage({
-          itemId: item.itemId,
-          text: by ? `Already claimed by ${memberName(by, members)}.` : "Already claimed by another Member.",
-        });
+        const text = by ? `Already claimed by ${memberName(by, members)}.` : "Already claimed by another Member.";
+        setRowMessage({ itemId: item.itemId, text });
+        toast.error(text);
         await onChanged();
       } else {
-        setRowMessage({ itemId: item.itemId, text: describeError(err).message });
+        const text = describeError(err).message;
+        setRowMessage({ itemId: item.itemId, text });
+        toast.error(text);
       }
     } finally {
       setRowBusy(null);
@@ -160,131 +181,180 @@ export function Checklist({ tripId, items, members, onChanged }: ChecklistProps)
       );
       if (!res.ok) {
         setRowStale(res.current as ChecklistItem);
+        toast.error(`"${item.fields.task}" was changed by someone else. Review the stored version.`);
         return;
       }
       await onChanged();
     } catch (err) {
-      setRowMessage({ itemId: item.itemId, text: describeError(err).message });
+      const text = describeError(err).message;
+      setRowMessage({ itemId: item.itemId, text });
+      toast.error(text);
     } finally {
       setRowBusy(null);
     }
   }
 
   async function remove(item: ChecklistItem) {
-    if (!window.confirm(`Delete "${item.fields.task}"?`)) return;
-    setError(undefined);
     try {
       await deleteItem(client, tripId, "Checklist", item.itemId);
       if (editing?.mode === "edit" && editing.itemId === item.itemId) resetForm();
+      toast.success("Task deleted.");
       await onChanged();
     } catch (err) {
-      setError(describeError(err).message);
+      toast.error(describeError(err).message);
     }
   }
 
   return (
-    <section aria-labelledby="checklist-heading">
-      <h2 id="checklist-heading">Checklist</h2>
+    <section aria-labelledby="checklist-heading" className="list-section">
+      <SectionHeader
+        id="checklist-heading"
+        title="Checklist"
+        description="Claim a task to let everyone know you are on it."
+        addLabel="Add task"
+        onAdd={startCreate}
+      />
       {items.length === 0 ? (
-        <p>No checklist tasks yet.</p>
+        <EmptyState title="No checklist tasks yet" description="Add the things that need doing before the trip." />
       ) : (
-        <ul>
-          {items.map((item) => {
-            const f = item.fields;
-            const busyRow = rowBusy === item.itemId;
-            return (
-              <li key={item.itemId} className="card">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={f.done}
-                    disabled={busyRow}
-                    onChange={(e) => void setDone(item, e.target.checked)}
-                  />{" "}
-                  {f.task}
-                </label>{" "}
-                {f.claimedBy ? (
-                  <span>· Claimed by {memberName(f.claimedBy, members)}</span>
-                ) : (
-                  <button type="button" disabled={busyRow} onClick={() => void claim(item)}>
-                    Claim
-                  </button>
-                )}
-                {rowMessage?.itemId === item.itemId && <p role="alert">{rowMessage.text}</p>}
-                {rowStale?.itemId === item.itemId && (
-                  <StaleConflict
-                    current={rowStale}
-                    members={members}
-                    onUseCurrent={() => {
-                      setRowStale(null);
-                      void onChanged();
-                    }}
-                  />
-                )}
-                <div>
-                  <LastModified
-                    lastModifiedBy={item.lastModifiedBy}
-                    lastModifiedAt={item.lastModifiedAt}
-                    members={members}
-                  />
-                </div>
-                <div>
-                  <button type="button" onClick={() => startEdit(item)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => void remove(item)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {!editing && error && <p role="alert">{error}</p>}
-      {!editing ? (
-        <button type="button" onClick={startCreate}>
-          Add task
-        </button>
-      ) : (
-        <form onSubmit={(e) => void submit(e)} noValidate>
-          <h3>{editing.mode === "create" ? "Add task" : "Edit task"}</h3>
-          {stale && (
-            <StaleConflict
-              current={stale}
-              members={members}
-              onUseCurrent={(current) => {
-                setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
-                setForm(editableFields(current));
-                setStale(null);
-              }}
-              onDismiss={() => {
-                // Keep local edits; the next save overwrites the stored version the Member has now seen.
-                setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
-                setStale(null);
-              }}
+        <>
+          <Card className="list-summary">
+            <ProgressBar
+              label="Checklist tasks done"
+              value={doneCount}
+              max={items.length}
+              tone={doneCount === items.length ? "success" : "accent"}
+              valueText={`${doneCount} of ${items.length} done`}
             />
-          )}
-          <Field label="Task" error={errorFor("task")}>
-            <input value={form.task} onChange={(e) => setForm((f) => ({ ...f, task: e.target.value }))} />
-          </Field>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.done}
-              onChange={(e) => setForm((f) => ({ ...f, done: e.target.checked }))}
-            />{" "}
-            Done
-          </label>
-          {error && <p role="alert">{error}</p>}
-          <button type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={resetForm} disabled={busy}>
-            Cancel
-          </button>
-        </form>
+            <div className="list-summary__stats">
+              <Badge tone="accent">{claimedCount} claimed</Badge>
+              <Badge tone={items.length - claimedCount > 0 ? "warning" : "neutral"}>
+                {items.length - claimedCount} unclaimed
+              </Badge>
+            </div>
+          </Card>
+          <ul className="item-list">
+            {items.map((item) => {
+              const f = item.fields;
+              const busyRow = rowBusy === item.itemId;
+              return (
+                <Card
+                  as="li"
+                  compact
+                  key={item.itemId}
+                  className={f.done ? "item-card item-card--done" : "item-card"}
+                  footer={
+                    <LastModified
+                      lastModifiedBy={item.lastModifiedBy}
+                      lastModifiedAt={item.lastModifiedAt}
+                      members={members}
+                    />
+                  }
+                >
+                  <div className="item-card__row">
+                    <div className="item-card__main">
+                      <Checkbox
+                        fieldClassName="item-card__check"
+                        label={f.task}
+                        checked={f.done}
+                        disabled={busyRow}
+                        onChange={(e) => void setDone(item, e.target.checked)}
+                      />
+                      <div className="item-card__meta">
+                        {f.claimedBy ? (
+                          <MemberChip userId={f.claimedBy} members={members} prefix="Claimed by" />
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={busyRow}
+                            onClick={() => void claim(item)}
+                            aria-label={`Claim ${f.task}`}
+                          >
+                            Claim
+                          </Button>
+                        )}
+                        {f.done && <Badge tone="success">Done</Badge>}
+                      </div>
+                      {rowMessage?.itemId === item.itemId && (
+                        <p role="alert" className="field-error">
+                          {rowMessage.text}
+                        </p>
+                      )}
+                    </div>
+                    <div className="item-card__actions">
+                      <ItemActions
+                        itemLabel={f.task}
+                        onEdit={() => startEdit(item)}
+                        onDelete={() => pendingDelete.request(item)}
+                      />
+                    </div>
+                  </div>
+                  {rowStale?.itemId === item.itemId && (
+                    <StaleConflict
+                      current={rowStale}
+                      members={members}
+                      onUseCurrent={() => {
+                        setRowStale(null);
+                        void onChanged();
+                      }}
+                    />
+                  )}
+                </Card>
+              );
+            })}
+          </ul>
+        </>
       )}
+
+      <FormDrawer
+        open={editing !== null}
+        title={editing?.mode === "edit" ? "Edit task" : "Add task"}
+        formId={formId}
+        busy={busy}
+        error={error}
+        onClose={resetForm}
+        onSubmit={(e) => void submit(e)}
+      >
+        {stale && (
+          <StaleConflict
+            current={stale}
+            members={members}
+            onUseCurrent={(current) => {
+              setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
+              setForm(editableFields(current));
+              setStale(null);
+            }}
+            onDismiss={() => {
+              // Keep local edits; the next save overwrites the stored version the Member has now seen.
+              setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
+              setStale(null);
+            }}
+          />
+        )}
+        <TextInput
+          label="Task"
+          required
+          data-autofocus
+          value={form.task}
+          error={errorFor("task")}
+          onChange={(e) => setForm((f) => ({ ...f, task: e.target.value }))}
+        />
+        <Checkbox
+          label="Done"
+          checked={form.done}
+          onChange={(e) => setForm((f) => ({ ...f, done: e.target.checked }))}
+        />
+      </FormDrawer>
+
+      <ConfirmDialog
+        open={pendingDelete.target !== null}
+        title={`Delete "${pendingDelete.target?.fields.task ?? "task"}"?`}
+        message="This removes the task for everyone on the trip."
+        busy={pendingDelete.busy}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => void pendingDelete.confirm(remove)}
+      />
     </section>
   );
 }

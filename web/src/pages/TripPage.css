@@ -1,0 +1,180 @@
+/* Trip page shell and Overview tab. Uses only the tokens defined in styles.css. */
+
+.trip-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ---------- header ---------- */
+.trip-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.trip-page__heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.trip-page__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+.trip-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.trip-page__countdown {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+  border: 1px solid var(--color-accent-soft-border);
+}
+.trip-page__countdown--today,
+.trip-page__countdown--ongoing {
+  background: var(--color-pass-soft);
+  color: var(--color-pass);
+  border-color: var(--color-pass-border);
+}
+.trip-page__countdown--ended {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+}
+.trip-page__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------- loading ---------- */
+.trip-page__header--loading {
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ---------- invite dialog ---------- */
+.trip-page__invite-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+
+/* ---------- overview ---------- */
+.trip-overview {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  align-items: start;
+}
+.trip-overview__actions {
+  grid-column: 1 / -1;
+}
+.trip-overview p {
+  margin: 0;
+}
+.trip-overview__muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.trip-overview__big {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+.trip-overview__stay-body,
+.trip-overview__progress-body,
+.trip-overview__prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.trip-overview__progress-body {
+  align-items: stretch;
+  gap: var(--space-4);
+}
+.trip-overview__progress-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.trip-overview__progress-row > .progress {
+  align-self: stretch;
+}
+.trip-overview__budget .progress {
+  margin-bottom: var(--space-2);
+}
+.trip-overview__score-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.trip-overview__score-body > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.trip-overview__stop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.trip-overview__stop-list li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-sm);
+}
+.trip-overview__stop-when {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+}
+.trip-overview__stop-name {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.trip-overview__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 600px) {
+  .trip-page__header-actions {
+    width: 100%;
+  }
+  .trip-overview {
+    grid-template-columns: 1fr;
+  }
+}

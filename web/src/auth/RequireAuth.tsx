@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Hub } from "aws-amplify/utils";
 import { getIdToken as defaultGetIdToken, signIn as defaultSignIn } from "./amplify";
+import { Button, LogoMark, SpinnerIcon } from "../ui";
 
 export interface RequireAuthProps {
   children: ReactNode;
@@ -40,15 +41,29 @@ export function RequireAuth({
     };
   }, [getIdToken]);
 
-  if (status === "loading") return <p role="status">Loading…</p>;
+  if (status === "loading") {
+    return (
+      <div className="auth-screen">
+        <p role="status" className="row text-muted">
+          <SpinnerIcon /> Loading…
+        </p>
+      </div>
+    );
+  }
   if (status === "signedOut") {
     return (
-      <main>
-        <h1>TripWise</h1>
-        <p>Sign in to see your trips.</p>
-        <button type="button" onClick={() => void onSignIn()}>
-          Sign in
-        </button>
+      <main className="auth-screen">
+        <div className="auth-card">
+          <h1>
+            <LogoMark size={32} className="topbar__logo" />
+            TripWise
+          </h1>
+          <p>Plan group trips together and check that the plan works before you book.</p>
+          <p>Sign in to see your trips.</p>
+          <Button size="lg" block onClick={() => void onSignIn()}>
+            Sign in
+          </Button>
+        </div>
       </main>
     );
   }

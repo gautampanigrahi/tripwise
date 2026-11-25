@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   formatEstimate,
   lodgingFromCatalogStay,
+  tripNights,
   validatePlanItem,
   type Catalog,
   type CatalogStay,
@@ -23,6 +24,24 @@ import {
 } from "../api/items";
 import { LastModified } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
+import {
+  Badge,
+  Button,
+  Card,
+  CheckIcon,
+  Checkbox,
+  ConfirmDialog,
+  Drawer,
+  EmptyState,
+  ErrorState,
+  PlusIcon,
+  Skeleton,
+  TextArea,
+  TextInput,
+  cx,
+  useToast,
+} from "../ui";
+import "./Lodging.css";
 
 export interface LodgingProps {
   tripId: string;
@@ -140,7 +159,8 @@ function describeError(err: unknown): { message: string; fields: FieldError[] } 
   return { message: err instanceof Error ? err.message : "Something went wrong.", fields: [] };
 }
 
-function priceLabel(fields: LodgingFields, stays: readonly CatalogStay[]): string {
+/** "Est. $X/night (as of …)" when the price still matches its Catalog stay, otherwise "$X/night". */
+export function priceLabel(fields: LodgingFields, stays: readonly CatalogStay[]): string {
   const stay = fields.catalogStayId ? stays.find((s) => s.id === fields.catalogStayId) : undefined;
   if (stay && stay.nightlyPrice.cents === fields.nightlyPriceCents) {
     return formatEstimate(stay.nightlyPrice, "night");
@@ -148,21 +168,50 @@ function priceLabel(fields: LodgingFields, stays: readonly CatalogStay[]): strin
   return `$${centsToDollars(fields.nightlyPriceCents)}/night`;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Number of nights between check-in and check-out, or undefined when either date is missing or invalid. */
+export function nightsBetween(checkIn: string, checkOut: string): number | undefined {
+  if (!ISO_DATE.test(checkIn) || !ISO_DATE.test(checkOut)) return undefined;
+  const n = tripNights(checkIn, checkOut).length;
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** "Fri, Jun 12, 2026" for an ISO date; the raw value when it does not parse. */
+export function formatStayDate(day: string): string {
+  if (!ISO_DATE.test(day)) return day;
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? day
+    : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Catalog features are a map of name → available; only available ones are shown. */
+function catalogFeatures(stay: CatalogStay): string[] {
+  return Object.entries(stay.features)
+    .filter(([, on]) => on)
+    .map(([name]) => name);
+}
+
 type Editing = { mode: "create" } | { mode: "edit"; itemId: string; expectedLastModifiedAt: string };
 
 export function Lodging({ tripId, items, members, onChanged, catalog: catalogProp }: LodgingProps) {
   const client = useApiClient();
+  const toast = useToast();
+  const formId = useId();
   const [catalog, setCatalog] = useState<Catalog | undefined>(catalogProp);
   const [catalogError, setCatalogError] = useState<string>();
-  const [pickedStayId, setPickedStayId] = useState("");
+  // Bumped by Retry to run the Catalog fetch again.
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [form, setForm] = useState<LodgingForm>(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState<LodgingItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<LodgingItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [fileBusy, setFileBusy] = useState<string | null>(null);
-  const [fileMessage, setFileMessage] = useState<{ itemId: string; text: string } | null>(null);
 
   useEffect(() => {
     if (catalogProp) {
@@ -170,6 +219,7 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
       return;
     }
     let cancelled = false;
+    setCatalogError(undefined);
     getCatalog(client)
       .then((c) => {
         if (!cancelled) setCatalog(c);
@@ -180,14 +230,14 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
     return () => {
       cancelled = true;
     };
-  }, [client, catalogProp]);
+  }, [client, catalogProp, catalogAttempt]);
 
   const stays = useMemo(() => catalog?.stays ?? [], [catalog]);
   const errorFor = (field: string) =>
     fieldErrors
       .filter((e) => e.field === field || e.field.startsWith(`${field}.`))
       .map((e) => e.message)
-      .join("; ");
+      .join("; ") || undefined;
 
   function set<K extends keyof LodgingForm>(key: K, value: LodgingForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -199,7 +249,6 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
     setFieldErrors([]);
     setError(undefined);
     setStale(null);
-    setPickedStayId("");
   }
 
   function startCreate() {
@@ -261,42 +310,50 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
         );
         if (!res.ok) {
           setStale(res.current as LodgingItem);
+          toast.error("Someone else changed this stay. Review their version before saving.");
           return;
         }
       }
+      const name = result.value.name ?? "Lodging";
+      toast.success(editing.mode === "create" ? `Added ${name}.` : `Saved ${name}.`);
       resetForm();
       await onChanged();
     } catch (err) {
       const d = describeError(err);
       setError(d.message);
       setFieldErrors(d.fields);
+      toast.error(`Could not save: ${d.message}`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function remove(item: LodgingItem) {
-    if (!window.confirm(`Delete ${item.fields.name ?? "this lodging"}?`)) return;
-    setError(undefined);
+  async function confirmDelete() {
+    const item = pendingDelete;
+    if (!item) return;
+    setDeleting(true);
     try {
       await deleteItem(client, tripId, "Lodging", item.itemId);
       if (editing?.mode === "edit" && editing.itemId === item.itemId) resetForm();
+      toast.success(`Deleted ${item.fields.name ?? "lodging"}.`);
+      setPendingDelete(null);
       await onChanged();
     } catch (err) {
-      setError(describeError(err).message);
+      toast.error(`Could not delete: ${describeError(err).message}`);
+    } finally {
+      setDeleting(false);
     }
   }
 
   async function upload(item: LodgingItem, file: File | undefined) {
     if (!file) return;
     setFileBusy(item.itemId);
-    setFileMessage(null);
     try {
       await uploadConfirmation(client, tripId, item.itemId, file);
-      setFileMessage({ itemId: item.itemId, text: `Uploaded ${file.name}.` });
+      toast.success(`Uploaded ${file.name}.`);
       await onChanged();
     } catch (err) {
-      setFileMessage({ itemId: item.itemId, text: `Upload failed: ${describeError(err).message}` });
+      toast.error(`Upload failed: ${describeError(err).message}`);
     } finally {
       setFileBusy(null);
     }
@@ -304,121 +361,76 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
 
   async function download(item: LodgingItem) {
     setFileBusy(item.itemId);
-    setFileMessage(null);
     try {
       const { url } = await getConfirmationDownloadUrl(client, tripId, item.itemId);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
-      setFileMessage({ itemId: item.itemId, text: `Download failed: ${describeError(err).message}` });
+      toast.error(`Download failed: ${describeError(err).message}`);
     } finally {
       setFileBusy(null);
     }
   }
 
+  const linkedStay = form.catalogStayId ? stays.find((s) => s.id === form.catalogStayId) : undefined;
+
   return (
-    <section aria-labelledby="lodging-heading">
-      <h2 id="lodging-heading">Lodging</h2>
-
-      {items.length === 0 ? (
-        <p>No lodging yet.</p>
-      ) : (
-        <ul>
-          {items.map((item) => {
-            const f = item.fields;
-            return (
-              <li key={item.itemId} className="card">
-                <h3>
-                  {f.name ?? "Lodging"}
-                  {f.selected ? " (selected)" : ""}
-                </h3>
-                {f.address && <p>{f.address}</p>}
-                {f.listingUrl && (
-                  <p>
-                    <a href={f.listingUrl} target="_blank" rel="noopener noreferrer">
-                      Listing
-                    </a>
-                  </p>
-                )}
-                <p>
-                  {f.checkIn} to {f.checkOut} · Sleeps {f.sleeps} · {priceLabel(f, stays)}
-                </p>
-                {f.features && f.features.length > 0 && <p>Features: {f.features.join(", ")}</p>}
-                {f.confirmationNumber && <p>Confirmation number: {f.confirmationNumber}</p>}
-                {f.checkInDetails?.doorCode && <p>Door code: {f.checkInDetails.doorCode}</p>}
-                {f.checkInDetails?.notes && <p>Check-in notes: {f.checkInDetails.notes}</p>}
-                <LastModified
-                  lastModifiedBy={item.lastModifiedBy}
-                  lastModifiedAt={item.lastModifiedAt}
-                  members={members}
-                />
-                <div>
-                  <button type="button" onClick={() => startEdit(item)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => void remove(item)}>
-                    Delete
-                  </button>
-                </div>
-                <div>
-                  <label>
-                    {f.confirmationKey ? "Replace confirmation file" : "Upload confirmation file"}{" "}
-                    <input
-                      type="file"
-                      disabled={fileBusy === item.itemId}
-                      onChange={(e) => {
-                        const input = e.currentTarget;
-                        void upload(item, input.files?.[0]).finally(() => {
-                          input.value = "";
-                        });
-                      }}
-                    />
-                  </label>
-                  {f.confirmationKey && (
-                    <button type="button" disabled={fileBusy === item.itemId} onClick={() => void download(item)}>
-                      Download confirmation
-                    </button>
-                  )}
-                  {fileMessage?.itemId === item.itemId && <p role="status">{fileMessage.text}</p>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <div>
-        <h3>Choose a stay from the Catalog</h3>
-        {catalogError ? (
-          <p role="alert">Could not load the Catalog: {catalogError}</p>
-        ) : !catalog ? (
-          <p>Loading Catalog…</p>
-        ) : (
-          <>
-            <label>
-              Catalog stay{" "}
-              <select value={pickedStayId} onChange={(e) => setPickedStayId(e.target.value)}>
-                <option value="">Select a stay…</option>
-                {stays.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} · sleeps {s.sleeps} · {formatEstimate(s.nightlyPrice, "night")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" disabled={!pickedStayId} onClick={() => applyStay(pickedStayId)}>
-              Prefill from stay
-            </button>
-          </>
+    <section aria-labelledby="lodging-heading" className="lodging">
+      <div className="lodging__header">
+        <h2 id="lodging-heading">Lodging</h2>
+        {items.length > 0 && (
+          <Button icon={<PlusIcon size={16} />} onClick={startCreate}>
+            Add lodging
+          </Button>
         )}
       </div>
 
-      {!editing ? (
-        <button type="button" onClick={startCreate}>
-          Add lodging
-        </button>
+      {items.length === 0 ? (
+        <EmptyState
+          title="No lodging yet"
+          description="Add a stay you are considering, or pick one from the San Diego Catalog."
+          action={
+            <Button icon={<PlusIcon size={16} />} onClick={startCreate}>
+              Add lodging
+            </Button>
+          }
+        />
       ) : (
-        <form onSubmit={(e) => void submit(e)} noValidate>
-          <h3>{editing.mode === "create" ? "Add lodging" : "Edit lodging"}</h3>
+        <ul className="lodging__list">
+          {items.map((item) => (
+            <StayCard
+              key={item.itemId}
+              item={item}
+              stays={stays}
+              members={members}
+              fileBusy={fileBusy === item.itemId}
+              onEdit={() => startEdit(item)}
+              onDelete={() => setPendingDelete(item)}
+              onUpload={(file) => upload(item, file)}
+              onDownload={() => void download(item)}
+            />
+          ))}
+        </ul>
+      )}
+
+      <Drawer
+        open={editing !== null}
+        onClose={() => {
+          if (!busy) resetForm();
+        }}
+        title={editing?.mode === "edit" ? "Edit lodging" : "Add lodging"}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={resetForm} disabled={busy}>
+              Cancel
+            </Button>
+            <Button type="submit" form={formId} loading={busy}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <form id={formId} className="lodging-form" onSubmit={(e) => void submit(e)} noValidate>
           {stale && (
             <StaleConflict
               current={stale}
@@ -435,87 +447,326 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
               }}
             />
           )}
-          <Field label="Name" error={errorFor("name")}>
-            <input value={form.name} onChange={(e) => set("name", e.target.value)} />
-          </Field>
-          <Field label="Listing link" error={errorFor("listingUrl")}>
-            <input
+
+          <fieldset className="lodging-form__group">
+            <legend>Choose a stay from the Catalog</legend>
+            {catalogError ? (
+              <ErrorState
+                compact
+                headingLevel={4}
+                title="Could not load the Catalog"
+                message={`${catalogError} You can still enter a stay by hand below.`}
+                onRetry={() => setCatalogAttempt((n) => n + 1)}
+              />
+            ) : !catalog ? (
+              <div className="catalog-picker" role="status" aria-busy="true">
+                <span className="visually-hidden">Loading Catalog…</span>
+                <Skeleton variant="rect" height={96} />
+                <Skeleton variant="rect" height={96} />
+              </div>
+            ) : stays.length === 0 ? (
+              <p className="text-muted">The Catalog has no stays.</p>
+            ) : (
+              <ul className="catalog-picker">
+                {stays.map((s) => {
+                  const picked = form.catalogStayId === s.id;
+                  return (
+                    <li key={s.id} className={cx("catalog-stay", picked && "catalog-stay--picked")}>
+                      <div className="catalog-stay__body">
+                        <strong className="catalog-stay__name">{s.name}</strong>
+                        <span className="catalog-stay__meta">{s.address}</span>
+                        <span className="catalog-stay__meta">Sleeps {s.sleeps}</span>
+                        <span className="catalog-stay__price">{formatEstimate(s.nightlyPrice, "night")}</span>
+                        {catalogFeatures(s).length > 0 && (
+                          <span className="lodging__features">
+                            {catalogFeatures(s).map((feat) => (
+                              <Badge key={feat}>{feat}</Badge>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={picked ? "secondary" : "primary"}
+                        icon={picked ? <CheckIcon size={14} /> : undefined}
+                        aria-pressed={picked}
+                        aria-label={picked ? `${s.name} prefilled` : `Use ${s.name}`}
+                        onClick={() => applyStay(s.id)}
+                      >
+                        {picked ? "Prefilled" : "Use this stay"}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {form.catalogStayId && (
+              <p className="lodging-form__linked">
+                Linked to Catalog stay {linkedStay?.name ?? form.catalogStayId}.{" "}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setForm((f) => ({ ...f, catalogStayId: "", features: [] }))}
+                >
+                  Unlink
+                </Button>
+              </p>
+            )}
+          </fieldset>
+
+          <fieldset className="lodging-form__group">
+            <legend>Stay</legend>
+            <TextInput label="Name" value={form.name} error={errorFor("name")} onChange={(e) => set("name", e.target.value)} />
+            <TextInput
+              label="Listing link"
               type="url"
               placeholder="https://"
               value={form.listingUrl}
+              error={errorFor("listingUrl")}
               onChange={(e) => set("listingUrl", e.target.value)}
             />
-          </Field>
-          <Field label="Address" error={errorFor("address")}>
-            <input value={form.address} onChange={(e) => set("address", e.target.value)} />
-          </Field>
-          <Field label="Check-in date" error={errorFor("checkIn")}>
-            <input type="date" value={form.checkIn} onChange={(e) => set("checkIn", e.target.value)} />
-          </Field>
-          <Field label="Check-out date" error={errorFor("checkOut")}>
-            <input type="date" value={form.checkOut} onChange={(e) => set("checkOut", e.target.value)} />
-          </Field>
-          <Field label="Sleeps" error={errorFor("sleeps")}>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={form.sleeps}
-              onChange={(e) => set("sleeps", e.target.value)}
+            <TextInput
+              label="Address"
+              value={form.address}
+              error={errorFor("address")}
+              onChange={(e) => set("address", e.target.value)}
             />
-          </Field>
-          <Field label="Nightly price (USD)" error={errorFor("nightlyPriceCents")}>
-            <input
-              inputMode="decimal"
-              value={form.nightlyPrice}
-              onChange={(e) => set("nightlyPrice", e.target.value)}
+            <div className="lodging-form__row">
+              <TextInput
+                label="Check-in date"
+                type="date"
+                required
+                value={form.checkIn}
+                error={errorFor("checkIn")}
+                onChange={(e) => set("checkIn", e.target.value)}
+              />
+              <TextInput
+                label="Check-out date"
+                type="date"
+                required
+                value={form.checkOut}
+                error={errorFor("checkOut")}
+                onChange={(e) => set("checkOut", e.target.value)}
+              />
+            </div>
+            <div className="lodging-form__row">
+              <TextInput
+                label="Sleeps"
+                type="number"
+                min={1}
+                step={1}
+                required
+                value={form.sleeps}
+                error={errorFor("sleeps")}
+                onChange={(e) => set("sleeps", e.target.value)}
+              />
+              <TextInput
+                label="Nightly price (USD)"
+                inputMode="decimal"
+                required
+                value={form.nightlyPrice}
+                hint={linkedStay ? formatEstimate(linkedStay.nightlyPrice, "night") : undefined}
+                error={errorFor("nightlyPriceCents")}
+                onChange={(e) => set("nightlyPrice", e.target.value)}
+              />
+            </div>
+            <Checkbox
+              label="Selected stay for feasibility checks"
+              checked={form.selected}
+              onChange={(e) => set("selected", e.target.checked)}
             />
-            {(() => {
-              const stay = form.catalogStayId ? stays.find((s) => s.id === form.catalogStayId) : undefined;
-              return stay ? <small> {formatEstimate(stay.nightlyPrice, "night")}</small> : null;
-            })()}
-          </Field>
-          <Field label="Confirmation number" error={errorFor("confirmationNumber")}>
-            <input value={form.confirmationNumber} onChange={(e) => set("confirmationNumber", e.target.value)} />
-          </Field>
-          <Field label="Door code" error={errorFor("checkInDetails.doorCode")}>
-            <input value={form.doorCode} onChange={(e) => set("doorCode", e.target.value)} />
-          </Field>
-          <Field label="Check-in details" error={errorFor("checkInDetails.notes")}>
-            <textarea value={form.checkInNotes} onChange={(e) => set("checkInNotes", e.target.value)} />
-          </Field>
-          <label>
-            <input type="checkbox" checked={form.selected} onChange={(e) => set("selected", e.target.checked)} />{" "}
-            Selected stay for feasibility checks
-          </label>
-          {form.catalogStayId && (
-            <p>
-              From Catalog stay {form.catalogStayId}{" "}
-              <button type="button" onClick={() => setForm((f) => ({ ...f, catalogStayId: "", features: [] }))}>
-                Unlink
-              </button>
+          </fieldset>
+
+          <fieldset className="lodging-form__group">
+            <legend>Check-in details</legend>
+            <TextInput
+              label="Confirmation number"
+              value={form.confirmationNumber}
+              error={errorFor("confirmationNumber")}
+              onChange={(e) => set("confirmationNumber", e.target.value)}
+            />
+            <TextInput
+              label="Door code"
+              value={form.doorCode}
+              error={errorFor("checkInDetails.doorCode")}
+              onChange={(e) => set("doorCode", e.target.value)}
+            />
+            <TextArea
+              label="Check-in notes"
+              value={form.checkInNotes}
+              error={errorFor("checkInDetails.notes")}
+              onChange={(e) => set("checkInNotes", e.target.value)}
+            />
+          </fieldset>
+
+          {error && (
+            <p role="alert" className="alert alert--danger">
+              {error}
             </p>
           )}
-          {error && <p role="alert">{error}</p>}
-          <button type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={resetForm} disabled={busy}>
-            Cancel
-          </button>
         </form>
-      )}
+      </Drawer>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete ${pendingDelete?.fields.name ?? "this lodging"}?`}
+        message="This removes the stay and its confirmation link for everyone on the trip."
+        busy={deleting}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
     </section>
   );
 }
 
-function Field({ label, error, children }: { label: string; error: string; children: ReactNode }) {
+interface StayCardProps {
+  item: LodgingItem;
+  stays: readonly CatalogStay[];
+  members?: readonly Pick<Membership, "userId" | "displayName">[];
+  fileBusy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onUpload: (file: File | undefined) => Promise<void>;
+  onDownload: () => void;
+}
+
+/** One Lodging item: summary always visible, door code and confirmation behind a toggle. */
+export function StayCard({ item, stays, members, fileBusy, onEdit, onDelete, onUpload, onDownload }: StayCardProps) {
+  const f = item.fields;
+  const [showDetails, setShowDetails] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const detailsId = useId();
+  const nights = nightsBetween(f.checkIn, f.checkOut);
+  const hasDetails = Boolean(f.confirmationNumber || f.checkInDetails?.doorCode || f.checkInDetails?.notes);
+  const name = f.name ?? "Lodging";
+
   return (
-    <div>
-      <label>
-        {label} {children}
-      </label>
-      {error && <span role="alert" className="field-error"> {error}</span>}
-    </div>
+    <Card
+      as="li"
+      className={cx("stay-card", f.selected && "stay-card--selected")}
+      title={name}
+      subtitle={f.address}
+      actions={
+        f.selected ? (
+          <Badge tone="success" icon={<CheckIcon size={12} />}>
+            Selected
+          </Badge>
+        ) : undefined
+      }
+      footer={
+        <div className="stay-card__footer">
+          <LastModified lastModifiedBy={item.lastModifiedBy} lastModifiedAt={item.lastModifiedAt} members={members} />
+          <div className="row">
+            <Button size="sm" variant="secondary" onClick={onEdit} aria-label={`Edit ${name}`}>
+              Edit
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Delete ${name}`}>
+              Delete
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <dl className="stay-card__facts">
+        <div>
+          <dt>Dates</dt>
+          <dd>
+            <time dateTime={f.checkIn}>{formatStayDate(f.checkIn)}</time> –{" "}
+            <time dateTime={f.checkOut}>{formatStayDate(f.checkOut)}</time>
+          </dd>
+        </div>
+        {nights !== undefined && (
+          <div>
+            <dt>Nights</dt>
+            <dd>{nights}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Sleeps</dt>
+          <dd>{f.sleeps}</dd>
+        </div>
+        <div>
+          <dt>Price</dt>
+          <dd>{priceLabel(f, stays)}</dd>
+        </div>
+      </dl>
+
+      {f.features && f.features.length > 0 && (
+        <div className="lodging__features" aria-label="Features">
+          {f.features.map((feat) => (
+            <Badge key={feat}>{feat}</Badge>
+          ))}
+        </div>
+      )}
+
+      {f.listingUrl && (
+        <p className="stay-card__link">
+          <a href={f.listingUrl} target="_blank" rel="noopener noreferrer">
+            View listing
+          </a>
+        </p>
+      )}
+
+      {hasDetails && (
+        <div className="stay-card__details">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={showDetails}
+            aria-controls={detailsId}
+            onClick={() => setShowDetails((v) => !v)}
+          >
+            {showDetails ? "Hide check-in details" : "Show check-in details"}
+          </Button>
+          {showDetails && (
+            <dl id={detailsId} className="stay-card__secret">
+              {f.confirmationNumber && (
+                <div>
+                  <dt>Confirmation number</dt>
+                  <dd>{f.confirmationNumber}</dd>
+                </div>
+              )}
+              {f.checkInDetails?.doorCode && (
+                <div>
+                  <dt>Door code</dt>
+                  <dd className="stay-card__code">{f.checkInDetails.doorCode}</dd>
+                </div>
+              )}
+              {f.checkInDetails?.notes && (
+                <div>
+                  <dt>Check-in notes</dt>
+                  <dd>{f.checkInDetails.notes}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+        </div>
+      )}
+
+      <div className="stay-card__file row">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="visually-hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          disabled={fileBusy}
+          onChange={(e) => {
+            const input = e.currentTarget;
+            void onUpload(input.files?.[0]).finally(() => {
+              input.value = "";
+            });
+          }}
+        />
+        <Button size="sm" variant="secondary" loading={fileBusy} onClick={() => fileInputRef.current?.click()}>
+          {f.confirmationKey ? "Replace confirmation file" : "Upload confirmation file"}
+        </Button>
+        {f.confirmationKey && (
+          <Button size="sm" variant="ghost" disabled={fileBusy} onClick={onDownload}>
+            Download confirmation
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }

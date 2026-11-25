@@ -446,6 +446,61 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
   - Replace remaining Claude model references in code and scripts (not spec docs) with the Nova Lite ID
   - _Requirements: 21.1, 21.2, 25.3_
 
+- [x] 20. Rework the web UI into a polished app (plain CSS)
+  - Follow design section "12. Web UI design". Plain CSS only, no new UI or CSS libraries; React 18 + Vite as present. Reuse the API modules in `web/src/api/*.ts`; no backend or API changes.
+  - [x] 20.1 Design tokens, UI primitives, and app shell
+    - Rewrite `web/src/styles.css` around CSS custom properties for color (light theme, one accent; pass green, fail red, warning amber), spacing, radius, shadow, and typography; global `:focus-visible` ring and a `prefers-reduced-motion` block
+    - Create `web/src/ui/` primitives: `Button`, `IconButton`, `Card`, `Badge`, `Avatar`/`AvatarStack` (from Member display names), `ProgressBar`, `ScoreRing`, `Dialog`, `ConfirmDialog`, `Drawer`, `ToastProvider` + `useToast`, `Skeleton`, `EmptyState`, `Tabs`, `Field`/`TextInput`/`Select`/`Checkbox`, plus an `index.ts` barrel; include the ARIA roles, focus trap, and Escape handling from the design
+    - Mount `ToastProvider` in `web/src/main.tsx`; add the top bar (logo, current user name or email, Sign out) and breadcrumbs in `web/src/main.tsx`/`web/src/router.tsx`
+    - Preserve existing behavior, props used by other components, routing, auth gating, and API calls
+    - _Requirements: 1.1, 19.2, 19.3, 19.4, 23.3_
+
+  - [x] 20.2 Trips home and invite acceptance
+    - Rework `web/src/pages/TripsPage.tsx`: trip cards (destination, dates, Role, member avatars and latest check status when available), "New trip" Dialog that still runs `validateTripInput` before create, EmptyState, Skeleton cards while loading, friendly error state
+    - Rework `web/src/pages/AcceptInvite.tsx` with clear success (link to the trip) and error states
+    - Preserve existing behavior, props used by other components, and API calls
+    - _Requirements: 2.1, 2.4, 3.1_
+
+  - [x] 20.3 Trip page shell and Overview tab
+    - Rework `web/src/pages/TripPage.tsx`: header with name, destination, dates, days-until countdown, member avatars, Invite button opening a Dialog with the existing invitation form; `Tabs` with Overview first, then the existing section, Constraints, and Checks tabs
+    - Create `web/src/pages/TripOverview.tsx`: selected stay card, budget used vs limit from the latest Check_Result Cost outcome, ScoreRing with label, checklist done/total, groceries purchased/total, next itinerary stops, quick actions; uses data `TripPage` already loads (no new endpoints)
+    - Preserve existing behavior, load-time fetches, props passed to section components, and API calls
+    - _Requirements: 3.1, 7.4, 13.6, 19.2, 19.3, 23.1_
+
+  - [x] 20.4 Lodging and Itinerary sections
+    - Rework `web/src/sections/Lodging.tsx`: stay cards, catalog picker as cards with "Estimated as of <date>" labels, Selected badge, confirmation upload/download, Drawer add/edit form, ConfirmDialog on delete, toasts on save/delete/conflict
+    - Rework `web/src/sections/Itinerary.tsx` as a day-by-day timeline ordered by start time, with Drawer form and EmptyState
+    - Preserve existing behavior, validators, props used by other components, and API calls
+    - _Requirements: 5.7, 6.1, 7.4, 23.3_
+
+  - [x] 20.5 Lists and simple sections
+    - Rework `web/src/sections/Groceries.tsx`, `Checklist.tsx`, `Expenses.tsx`, `GenericSection.tsx`, and `planSectionHelpers.tsx`: item cards, "Add" opens a Drawer form, inline checkbox toggles (purchased, done), Member names instead of IDs, EmptyStates, ConfirmDialog before delete, toasts on save/delete/conflict, `lastModified` on each card; Expenses keeps no payment controls
+    - Preserve existing behavior, validators, props used by other components, and API calls
+    - _Requirements: 5.7, 8.1, 9.1, 10.1, 10.3, 23.3_
+
+  - [x] 20.6 Constraints and Checks
+    - Rework `web/src/sections/Constraints.tsx` as grouped form cards with inline errors and a save toast
+    - Rework `web/src/checks/ChecksPanel.tsx`: Feasible / Not feasible banner with ScoreRing, one card per check with a measured-vs-limit bar and unit-aware formatting, failed checks first, Bedrock explanation in a highlighted box with a source Badge, history as a compact newest-first list
+    - Rework `web/src/checks/AlternativeView.tsx` as side-by-side cards; extend `web/src/checks/format.ts` helpers as needed
+    - Preserve existing behavior, props used by other components, and API calls
+    - _Requirements: 11.1, 13.6, 19.2, 19.3, 19.4, 20.3, 21.6_
+
+  - [x] 20.7 Responsive, accessibility, and consistency pass
+    - Review every screen at widths down to 360px (stacked cards, horizontally scrolling tabs, full-width Drawer); keyboard focus order and visible focus; ARIA on dialogs, tabs, and toasts; `prefers-reduced-motion`
+    - Use shared Skeleton loading and error-with-Retry states everywhere; update `web/src/components/LastModified.tsx` and `StaleConflict.tsx` styling to match; remove leftover unused CSS from `web/src/styles.css`
+    - Preserve existing behavior, props used by other components, and API calls
+    - _Requirements: 5.7, 19.4, 23.1, 23.3_
+
+  - [ ]* 20.8 Write React Testing Library smoke tests for UI primitives and TripsPage
+    - Dialog traps focus and closes on Escape; Toast appears in the live region; Tabs arrow-key navigation and `aria-selected`; TripsPage shows the EmptyState with no trips
+    - Add jsdom and React Testing Library dev dependencies to `web/package.json` only in this task
+    - Preserve existing behavior, props used by other components, and API calls
+    - _Requirements: 2.4, 19.4_
+
+  - [x] 20.9 Checkpoint - Web UI builds and all tests pass
+    - Run the web typecheck, `npm run build -w web`, and all vitest tests
+    - Ensure all tests pass, ask the user if questions arise.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
@@ -457,6 +512,7 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
 - Task 17 does not depend on tasks 15.x or 16. In the dependency graph its waves (15–18) run right after checkpoint 14 and before the remaining 15.x tasks and checkpoint 16.
 - Task 18 is listed after task 17 but runs in wave 20, after task 15.1 (both touch `web/src/pages/TripPage.tsx` and section components) and before checkpoint 16. Task 15.8 also edits `web/src/sections/GenericSection.tsx`, so it stays in wave 21, after task 18.
 - Task 19 switches the Bedrock model from Anthropic Claude to Amazon Nova Lite (`amazon.nova-lite-v1:0`, on-demand in us-west-2) because the AWS Free plan cannot create the AWS Marketplace agreements Claude models require. It depends only on task 18. It sits alone in final wave 23 for ordering; it does not need tasks 15.7, 15.8, or checkpoint 16 to be done.
+- Task 20 reworks the web UI with plain CSS (design section 12) and replaces the basic stylesheet from task 18. It runs in waves 24–27 after task 19. Task 20.1 runs alone because every later sub-task uses its primitives. Tasks 20.2–20.6 touch different files and run in parallel; 20.3 owns `web/src/pages/TripPage.tsx`. Task 20.7 touches all screens, so it runs after them, together with optional tests 20.8.
 
 ## Task Dependency Graph
 
@@ -486,7 +542,11 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 20, "tasks": ["15.2", "15.4", "15.5", "18"] },
     { "id": 21, "tasks": ["15.6", "15.8"] },
     { "id": 22, "tasks": ["16"] },
-    { "id": 23, "tasks": ["19"] }
+    { "id": 23, "tasks": ["19"] },
+    { "id": 24, "tasks": ["20.1"] },
+    { "id": 25, "tasks": ["20.2", "20.3", "20.4", "20.5", "20.6"] },
+    { "id": 26, "tasks": ["20.7", "20.8"] },
+    { "id": 27, "tasks": ["20.9"] }
   ]
 }
 ```

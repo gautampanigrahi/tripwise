@@ -978,6 +978,109 @@
         "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
         "timestamp": 1795574674300
       }
+    ],
+    "20.1 Design tokens, UI primitives, and app shell": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795578821262
+      },
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579384510
+      }
+    ],
+    "20.2 Trips home and invite acceptance": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579389606
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581908604
+      }
+    ],
+    "20.3 Trip page shell and Overview tab": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579390091
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581909023
+      }
+    ],
+    "20.4 Lodging and Itinerary sections": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579391594
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581910054
+      }
+    ],
+    "20.5 Lists and simple sections": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579392621
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581911043
+      }
+    ],
+    "20.6 Constraints and Checks": [
+      {
+        "executionId": "ea0d1670-fe8c-44a3-9e24-bd37f2d96da4",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795579393037
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581911286
+      }
+    ],
+    "20.7 Responsive, accessibility, and consistency pass": [
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795581915769
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795582958855
+      }
+    ],
+    "20.9 Checkpoint - Web UI builds and all tests pass": [
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795582959361
+      },
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795583032482
+      }
+    ],
+    "20. Rework the web UI into a polished app (plain CSS)": [
+      {
+        "executionId": "211a3e1b-366a-4d55-ba7c-09a09c9b5c61",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795583032517
+      }
     ]
   }
 }

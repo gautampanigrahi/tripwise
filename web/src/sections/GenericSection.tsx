@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import {
   validatePlanItem,
   type FieldError,
@@ -10,15 +10,21 @@ import { useApiClient } from "../api/ApiClientContext";
 import { createItem, deleteItem, updateItem } from "../api/items";
 import { LastModified } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
+import { Badge, Card, ConfirmDialog, EmptyState, TextArea, TextInput, useToast } from "../ui";
 import {
   centsToDollars,
   describeError,
   dollarsToCents,
   errorsFor,
-  Field,
+  formatUsd,
+  FormDrawer,
+  ItemActions,
+  SectionHeader,
+  usePendingDelete,
   type Editing,
   type MemberOption,
 } from "./planSectionHelpers";
+import "./lists.css";
 
 export type GenericSectionName = "Transportation" | "Reservations" | "ScratchPad";
 export type GenericItem = PlanItem<GenericFields>;
@@ -38,6 +44,12 @@ export interface GenericSectionProps {
 const GENERIC_CTX: ValidationContext = {
   trip: { startDate: "1970-01-01", endDate: "1970-01-01" },
   memberIds: new Set(),
+};
+
+const EMPTY_COPY: Record<GenericSectionName, string> = {
+  Transportation: "Add flights, rental cars, or rides so everyone knows how they are getting there.",
+  Reservations: "Add restaurant bookings, tickets, and other reservations.",
+  ScratchPad: "Jot down ideas, links, and notes for the group.",
 };
 
 interface GenericForm {
@@ -73,12 +85,15 @@ function fieldsFromForm(form: GenericForm): Record<string, unknown> {
 /** Create, view, edit, and delete for the Transportation, Reservations, and ScratchPad Sections (Req 5.8). */
 export function GenericSection({ tripId, section, heading, items, members, onChanged }: GenericSectionProps) {
   const client = useApiClient();
+  const toast = useToast();
+  const formId = useId();
   const [editing, setEditing] = useState<Editing | null>(null);
   const [form, setForm] = useState<GenericForm>(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState<GenericItem | null>(null);
+  const pendingDelete = usePendingDelete<GenericItem>();
   const errorFor = (field: string) => errorsFor(fieldErrors, field);
   const headingId = `${section.toLowerCase()}-heading`;
 
@@ -128,9 +143,11 @@ export function GenericSection({ tripId, section, heading, items, members, onCha
         );
         if (!res.ok) {
           setStale(res.current);
+          toast.error("Someone else changed this item. Your changes were not saved.");
           return;
         }
       }
+      toast.success(editing.mode === "create" ? `Added ${result.value.title}.` : `Saved ${result.value.title}.`);
       resetForm();
       await onChanged();
     } catch (err) {
@@ -143,108 +160,134 @@ export function GenericSection({ tripId, section, heading, items, members, onCha
   }
 
   async function remove(item: GenericItem) {
-    if (!window.confirm(`Delete ${item.fields.title}?`)) return;
-    setError(undefined);
     try {
       await deleteItem(client, tripId, section, item.itemId);
       if (editing?.mode === "edit" && editing.itemId === item.itemId) resetForm();
+      toast.success(`Deleted ${item.fields.title}.`);
       await onChanged();
     } catch (err) {
-      setError(describeError(err).message);
+      toast.error(describeError(err).message);
     }
   }
 
   return (
-    <section aria-labelledby={headingId}>
-      <h2 id={headingId}>{heading}</h2>
+    <section aria-labelledby={headingId} className="list-section">
+      <SectionHeader id={headingId} title={heading} addLabel="Add item" onAdd={startCreate} />
       {items.length === 0 ? (
-        <p>Nothing here yet.</p>
+        <EmptyState title="Nothing here yet" description={EMPTY_COPY[section]} />
       ) : (
-        <ul>
+        <ul className="item-list">
           {items.map((item) => {
             const f = item.fields;
             return (
-              <li key={item.itemId} className="card">
-                <strong>{f.title}</strong>
-                {f.date && <span> · {f.date}</span>}
-                {f.costCents !== undefined && <span> · ${centsToDollars(f.costCents)}</span>}
-                {f.link && (
-                  <span>
-                    {" "}
-                    ·{" "}
-                    <a href={f.link} target="_blank" rel="noopener noreferrer">
-                      Link
-                    </a>
-                  </span>
-                )}
-                {f.notes && <p>{f.notes}</p>}
-                <div>
+              <Card
+                as="li"
+                compact
+                key={item.itemId}
+                className="item-card"
+                footer={
                   <LastModified
                     lastModifiedBy={item.lastModifiedBy}
                     lastModifiedAt={item.lastModifiedAt}
                     members={members}
                   />
+                }
+              >
+                <div className="item-card__row">
+                  <div className="item-card__main">
+                    <h3 className="item-card__title">{f.title}</h3>
+                    {(f.date || f.costCents !== undefined || f.link) && (
+                      <div className="item-card__meta">
+                        {f.date && <Badge tone="accent">{f.date}</Badge>}
+                        {f.costCents !== undefined && <Badge>{formatUsd(f.costCents)}</Badge>}
+                        {f.link && (
+                          <a href={f.link} target="_blank" rel="noopener noreferrer">
+                            Open link
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {f.notes && <p className="item-card__notes">{f.notes}</p>}
+                  </div>
+                  <div className="item-card__actions">
+                    <ItemActions
+                      itemLabel={f.title}
+                      onEdit={() => startEdit(item)}
+                      onDelete={() => pendingDelete.request(item)}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <button type="button" onClick={() => startEdit(item)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => void remove(item)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
+              </Card>
             );
           })}
         </ul>
       )}
-      {!editing && error && <p role="alert">{error}</p>}
-      {!editing ? (
-        <button type="button" onClick={startCreate}>
-          Add item
-        </button>
-      ) : (
-        <form onSubmit={(e) => void submit(e)} noValidate>
-          <h3>{editing.mode === "create" ? "Add item" : "Edit item"}</h3>
-          {stale && (
-            <StaleConflict
-              current={stale}
-              members={members}
-              onUseCurrent={(current) => {
-                setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
-                setForm(formFromFields(current.fields));
-                setStale(null);
-              }}
-              onDismiss={() => {
-                setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
-                setStale(null);
-              }}
-            />
-          )}
-          <Field label="Title" error={errorFor("title")}>
-            <input value={form.title} onChange={(e) => set("title", e.target.value)} />
-          </Field>
-          <Field label="Date" error={errorFor("date")}>
-            <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} />
-          </Field>
-          <Field label="Link (https)" error={errorFor("link")}>
-            <input type="url" value={form.link} onChange={(e) => set("link", e.target.value)} />
-          </Field>
-          <Field label="Cost (USD)" error={errorFor("costCents")}>
-            <input inputMode="decimal" value={form.cost} onChange={(e) => set("cost", e.target.value)} />
-          </Field>
-          <Field label="Notes" error={errorFor("notes")}>
-            <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} />
-          </Field>
-          {error && <p role="alert">{error}</p>}
-          <button type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={resetForm} disabled={busy}>
-            Cancel
-          </button>
-        </form>
-      )}
+
+      <FormDrawer
+        open={editing !== null}
+        title={editing?.mode === "edit" ? "Edit item" : "Add item"}
+        formId={formId}
+        busy={busy}
+        error={error}
+        onClose={resetForm}
+        onSubmit={(e) => void submit(e)}
+      >
+        {stale && (
+          <StaleConflict
+            current={stale}
+            members={members}
+            onUseCurrent={(current) => {
+              setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
+              setForm(formFromFields(current.fields));
+              setStale(null);
+            }}
+            onDismiss={() => {
+              setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
+              setStale(null);
+            }}
+          />
+        )}
+        <TextInput
+          label="Title"
+          required
+          data-autofocus
+          value={form.title}
+          error={errorFor("title")}
+          onChange={(e) => set("title", e.target.value)}
+        />
+        <TextInput
+          label="Date"
+          type="date"
+          value={form.date}
+          error={errorFor("date")}
+          onChange={(e) => set("date", e.target.value)}
+        />
+        <TextInput
+          label="Link (https)"
+          type="url"
+          value={form.link}
+          error={errorFor("link")}
+          onChange={(e) => set("link", e.target.value)}
+        />
+        <TextInput
+          label="Cost (USD)"
+          hint="Optional, up to 2 decimals"
+          inputMode="decimal"
+          value={form.cost}
+          error={errorFor("costCents")}
+          onChange={(e) => set("cost", e.target.value)}
+        />
+        <TextArea label="Notes" value={form.notes} error={errorFor("notes")} onChange={(e) => set("notes", e.target.value)} />
+      </FormDrawer>
+
+      <ConfirmDialog
+        open={pendingDelete.target !== null}
+        title={`Delete ${pendingDelete.target?.fields.title ?? "item"}?`}
+        message="This removes the item for everyone on the trip."
+        busy={pendingDelete.busy}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => void pendingDelete.confirm(remove)}
+      />
     </section>
   );
 }

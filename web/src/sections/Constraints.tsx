@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   formatEstimate,
   validateConstraints,
@@ -13,6 +13,8 @@ import { ApiError } from "../api/client";
 import { getCatalog } from "../api/catalog";
 import { putConstraints } from "../api/checks";
 import { describeApiError, getConstraints } from "../api/trips";
+import { Button, Card, Checkbox, ErrorState, LoadingState, Skeleton, TextInput, cx, useToast } from "../ui";
+import "./Constraints.css";
 
 export interface ConstraintsProps {
   tripId: string;
@@ -112,10 +114,14 @@ function toggle(list: readonly string[], value: string, on: boolean): string[] {
 
 export function Constraints({ tripId, onChanged, constraints: constraintsProp, catalog: catalogProp }: ConstraintsProps) {
   const client = useApiClient();
+  const toast = useToast();
   const [stored, setStored] = useState<TripConstraints | null | undefined>(constraintsProp);
   const [loadError, setLoadError] = useState<string>();
   const [catalog, setCatalog] = useState<Catalog | undefined>(catalogProp);
   const [catalogError, setCatalogError] = useState<string>();
+  // Bumped by Retry to run the constraints or Catalog fetch again.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [form, setForm] = useState<ConstraintsForm>(constraintsProp ? formFromConstraints(constraintsProp) : EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [error, setError] = useState<string>();
@@ -130,6 +136,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
       return;
     }
     let cancelled = false;
+    setLoadError(undefined);
     getConstraints(client, tripId)
       .then((c) => {
         if (cancelled) return;
@@ -142,7 +149,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
     return () => {
       cancelled = true;
     };
-  }, [client, tripId, constraintsProp]);
+  }, [client, tripId, constraintsProp, loadAttempt]);
 
   useEffect(() => {
     if (catalogProp) {
@@ -150,6 +157,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
       return;
     }
     let cancelled = false;
+    setCatalogError(undefined);
     getCatalog(client)
       .then((c) => {
         if (!cancelled) setCatalog(c);
@@ -160,7 +168,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
     return () => {
       cancelled = true;
     };
-  }, [client, catalogProp]);
+  }, [client, catalogProp, catalogAttempt]);
 
   /** Features offered by any Catalog stay, plus any already required that the Catalog no longer lists. */
   const featureOptions = useMemo(() => {
@@ -192,6 +200,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
       setFieldErrors(result.errors);
       setError("Please fix the highlighted fields.");
       setSaved(false);
+      toast.error("Some fields need attention.");
       return;
     }
     setBusy(true);
@@ -202,6 +211,7 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
       const next = await putConstraints(client, tripId, input as ConstraintsInput);
       setStored(next && typeof next === "object" && "budgetCents" in next ? next : result.value);
       setSaved(true);
+      toast.success("Constraints saved.");
       await onChanged();
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
@@ -212,7 +222,9 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
           return;
         }
       }
-      setError(describeApiError(err));
+      const message = describeApiError(err);
+      setError(message);
+      toast.error(`Could not save the constraints: ${message}`);
     } finally {
       setBusy(false);
     }
@@ -224,172 +236,300 @@ export function Constraints({ tripId, onChanged, constraints: constraintsProp, c
       ? `Total budget limit: $${form.budget.trim()} × ${travelers} travelers.`
       : undefined;
 
-  return (
-    <section aria-labelledby="constraints-heading">
-      <h2 id="constraints-heading">Trip constraints</h2>
-      {loadError && <p role="alert">Could not load the saved constraints: {loadError}</p>}
-      {stored === undefined && !loadError && <p>Loading constraints…</p>}
-      {stored === null && <p>No constraints saved yet.</p>}
-
-      <form onSubmit={(e) => void submit(e)} noValidate>
-        <Field label="Destination" error={errorFor("destination")}>
-          <input value={form.destination} onChange={(e) => set("destination", e.target.value)} />
-        </Field>
-        <Field label="Start date" error={errorFor("startDate")}>
-          <input type="date" value={form.startDate} onChange={(e) => set("startDate", e.target.value)} />
-        </Field>
-        <Field label="End date" error={errorFor("endDate")}>
-          <input type="date" value={form.endDate} onChange={(e) => set("endDate", e.target.value)} />
-        </Field>
-        <Field label="Travelers" error={errorFor("travelerCount")}>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={form.travelerCount}
-            onChange={(e) => set("travelerCount", e.target.value)}
-          />
-        </Field>
-        <Field label="Budget (USD)" error={errorFor("budget")}>
-          <input
-            inputMode="decimal"
-            placeholder="2500.00"
-            value={form.budget}
-            onChange={(e) => set("budget", e.target.value)}
-          />
-        </Field>
-        <fieldset>
-          <legend>Budget type</legend>
-          <label>
-            <input
-              type="radio"
-              name="budgetType"
-              checked={form.budgetType === "total"}
-              onChange={() => set("budgetType", "total")}
-            />{" "}
-            Total for the group
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="budgetType"
-              checked={form.budgetType === "perPerson"}
-              onChange={() => set("budgetType", "perPerson")}
-            />{" "}
-            Per person
-          </label>
-          {budgetNote && <p>{budgetNote}</p>}
-          {errorFor("budgetType") && <span role="alert" className="field-error"> {errorFor("budgetType")}</span>}
-        </fieldset>
-
-        <fieldset>
-          <legend>Required features</legend>
-          {featureOptions.length === 0 ? (
-            <p>{catalogError ? `Could not load the Catalog: ${catalogError}` : "Loading features…"}</p>
-          ) : (
-            featureOptions.map((f) => (
-              <label key={f}>
-                <input
-                  type="checkbox"
-                  checked={form.requiredFeatures.includes(f)}
-                  onChange={(e) => set("requiredFeatures", toggle(form.requiredFeatures, f, e.target.checked))}
-                />{" "}
-                {f}
-              </label>
-            ))
-          )}
-          {errorFor("requiredFeatures") && <span role="alert" className="field-error"> {errorFor("requiredFeatures")}</span>}
-        </fieldset>
-
-        <fieldset>
-          <legend>Planned activities</legend>
-          {catalogError ? (
-            <p role="alert">Could not load the Catalog: {catalogError}</p>
-          ) : !catalog ? (
-            <p>Loading activities…</p>
-          ) : (
-            activities.map((a) => (
-              <label key={a.id} style={{ display: "block" }}>
-                <input
-                  type="checkbox"
-                  checked={form.plannedActivityIds.includes(a.id)}
-                  onChange={(e) => set("plannedActivityIds", toggle(form.plannedActivityIds, a.id, e.target.checked))}
-                />{" "}
-                {a.name} · {formatEstimate(a.pricePerPerson, "person")}
-              </label>
-            ))
-          )}
-          {unknownActivityIds.length > 0 && (
-            <p role="alert">
-              Not in the Catalog: {unknownActivityIds.join(", ")}{" "}
-              <button
-                type="button"
-                onClick={() =>
-                  set(
-                    "plannedActivityIds",
-                    form.plannedActivityIds.filter((id) => !unknownActivityIds.includes(id)),
-                  )
-                }
-              >
-                Remove
-              </button>
-            </p>
-          )}
-          {errorFor("plannedActivityIds") && <span role="alert" className="field-error"> {errorFor("plannedActivityIds")}</span>}
-        </fieldset>
-
-        <Field label="Accessibility needs (comma separated)" error={errorFor("accessibilityNeeds")}>
-          <input value={form.accessibilityNeeds} onChange={(e) => set("accessibilityNeeds", e.target.value)} />
-        </Field>
-        <Field label="Walking-distance limit (meters, optional)" error={errorFor("walkingDistanceLimitMeters")}>
-          <input
-            type="number"
-            min={1}
-            value={form.walkingDistanceLimitMeters}
-            onChange={(e) => set("walkingDistanceLimitMeters", e.target.value)}
-          />
-        </Field>
-        <Field label="Daily travel-time cap (minutes, optional)" error={errorFor("travelTimeCapMinutes")}>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={form.travelTimeCapMinutes}
-            onChange={(e) => set("travelTimeCapMinutes", e.target.value)}
-          />
-        </Field>
-
-        {error && <p role="alert">{error}</p>}
-        {saved && <p role="status">Constraints saved.</p>}
-        <button type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save constraints"}
-        </button>
-        {stored && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setForm(formFromConstraints(stored));
-              setFieldErrors([]);
-              setError(undefined);
-              setSaved(false);
-            }}
-          >
-            Reset
-          </button>
-        )}
-      </form>
-    </section>
+  const loading = stored === undefined && !loadError;
+  const dirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(stored ? formFromConstraints(stored) : EMPTY_FORM),
+    [form, stored],
   );
-}
 
-function Field({ label, error, children }: { label: string; error: string; children: ReactNode }) {
   return (
-    <div>
-      <label>
-        {label} {children}
-      </label>
-      {error && <span role="alert" className="field-error"> {error}</span>}
-    </div>
+    <section className="constraints" aria-labelledby="constraints-heading">
+      <header className="constraints__header">
+        <h2 id="constraints-heading">Trip constraints</h2>
+        <p className="constraints__muted">
+          The feasibility checks compare your stay, activities, and schedule against these limits.
+        </p>
+      </header>
+      {loadError && (
+        <ErrorState
+          title="Could not load the saved constraints"
+          message={loadError}
+          onRetry={() => setLoadAttempt((n) => n + 1)}
+        />
+      )}
+      {loading && <LoadingState label="Loading constraints…" cards={3} />}
+      {stored === null && (
+        <p className="alert alert--warning">No constraints saved yet. Fill in the form and save to enable checks.</p>
+      )}
+
+      {!loading && (
+      <form className="constraints__form" onSubmit={(e) => void submit(e)} noValidate>
+        <Card as="section" title="Trip basics" headingLevel={3} className="constraints__card">
+          <div className="constraints__grid">
+            <TextInput
+              label="Destination"
+              value={form.destination}
+              onChange={(e) => set("destination", e.target.value)}
+              error={errorFor("destination")}
+            />
+            <TextInput
+              label="Travelers"
+              type="number"
+              min={1}
+              step={1}
+              value={form.travelerCount}
+              onChange={(e) => set("travelerCount", e.target.value)}
+              error={errorFor("travelerCount")}
+            />
+            <TextInput
+              label="Start date"
+              type="date"
+              value={form.startDate}
+              onChange={(e) => set("startDate", e.target.value)}
+              error={errorFor("startDate")}
+            />
+            <TextInput
+              label="End date"
+              type="date"
+              value={form.endDate}
+              onChange={(e) => set("endDate", e.target.value)}
+              error={errorFor("endDate")}
+            />
+          </div>
+        </Card>
+
+        <Card as="section" title="Budget" headingLevel={3} className="constraints__card">
+          <div className="constraints__grid">
+            <TextInput
+              label="Budget (USD)"
+              inputMode="decimal"
+              placeholder="2500.00"
+              value={form.budget}
+              onChange={(e) => set("budget", e.target.value)}
+              error={errorFor("budget")}
+            />
+            <fieldset className="constraints__segmented" aria-invalid={errorFor("budgetType") ? true : undefined}>
+              <legend className="field__label">Budget type</legend>
+              <div className="constraints__segments">
+                <label className={cx("constraints__segment", form.budgetType === "total" && "constraints__segment--on")}>
+                  <input
+                    type="radio"
+                    name="budgetType"
+                    checked={form.budgetType === "total"}
+                    onChange={() => set("budgetType", "total")}
+                  />
+                  Total for the group
+                </label>
+                <label
+                  className={cx("constraints__segment", form.budgetType === "perPerson" && "constraints__segment--on")}
+                >
+                  <input
+                    type="radio"
+                    name="budgetType"
+                    checked={form.budgetType === "perPerson"}
+                    onChange={() => set("budgetType", "perPerson")}
+                  />
+                  Per person
+                </label>
+              </div>
+              {errorFor("budgetType") && (
+                <span role="alert" className="field-error">
+                  {errorFor("budgetType")}
+                </span>
+              )}
+            </fieldset>
+          </div>
+          {budgetNote && <p className="constraints__note">{budgetNote}</p>}
+        </Card>
+
+        <Card
+          as="section"
+          title="Stay requirements"
+          subtitle="The Preferences check fails when the stay lacks any of these features."
+          headingLevel={3}
+          className="constraints__card"
+        >
+          <fieldset className="constraints__fieldset">
+            <legend className="field__label">Required features</legend>
+            {featureOptions.length === 0 ? (
+              catalogError ? (
+                <p className="field-error">Could not load the Catalog, so no features are listed.</p>
+              ) : !catalog ? (
+                <div role="status" aria-busy="true">
+                  <span className="visually-hidden">Loading features…</span>
+                  <Skeleton lines={2} width="60%" />
+                </div>
+              ) : (
+                <p className="constraints__muted">The Catalog lists no stay features.</p>
+              )
+            ) : (
+              <div className="constraints__features">
+                {featureOptions.map((f) => (
+                  <Checkbox
+                    key={f}
+                    label={f}
+                    checked={form.requiredFeatures.includes(f)}
+                    onChange={(e) => set("requiredFeatures", toggle(form.requiredFeatures, f, e.target.checked))}
+                    fieldClassName={cx(
+                      "constraints__chip",
+                      form.requiredFeatures.includes(f) && "constraints__chip--on",
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+            {errorFor("requiredFeatures") && (
+              <span role="alert" className="field-error">
+                {errorFor("requiredFeatures")}
+              </span>
+            )}
+          </fieldset>
+          <TextInput
+            label="Accessibility needs"
+            hint="Comma separated, e.g. step-free entry, ground floor"
+            value={form.accessibilityNeeds}
+            onChange={(e) => set("accessibilityNeeds", e.target.value)}
+            error={errorFor("accessibilityNeeds")}
+          />
+        </Card>
+
+        <Card
+          as="section"
+          title="Activities"
+          subtitle={
+            form.plannedActivityIds.length > 0
+              ? `${form.plannedActivityIds.length} selected. Activity prices count toward the Cost check per traveler.`
+              : "Activity prices count toward the Cost check per traveler."
+          }
+          headingLevel={3}
+          className="constraints__card"
+        >
+          <fieldset className="constraints__fieldset">
+            <legend className="visually-hidden">Planned activities</legend>
+            {catalogError ? (
+              <ErrorState
+                compact
+                headingLevel={4}
+                title="Could not load the Catalog"
+                message={catalogError}
+                onRetry={() => setCatalogAttempt((n) => n + 1)}
+              />
+            ) : !catalog ? (
+              <div role="status" aria-busy="true" className="constraints__activities">
+                <span className="visually-hidden">Loading activities…</span>
+                <Skeleton variant="rect" height={64} />
+                <Skeleton variant="rect" height={64} />
+              </div>
+            ) : (
+              <div className="constraints__activities">
+                {activities.map((a) => {
+                  const on = form.plannedActivityIds.includes(a.id);
+                  return (
+                    <label key={a.id} className={cx("constraints__activity", on && "constraints__activity--on")}>
+                      <input
+                        type="checkbox"
+                        className="constraints__activity-input"
+                        checked={on}
+                        onChange={(e) =>
+                          set("plannedActivityIds", toggle(form.plannedActivityIds, a.id, e.target.checked))
+                        }
+                      />
+                      <span className="constraints__activity-name">{a.name}</span>
+                      <span className="constraints__activity-price">{formatEstimate(a.pricePerPerson, "person")}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {unknownActivityIds.length > 0 && (
+              <div role="alert" className="alert alert--danger constraints__unknown">
+                <span>Not in the Catalog: {unknownActivityIds.join(", ")}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    set(
+                      "plannedActivityIds",
+                      form.plannedActivityIds.filter((id) => !unknownActivityIds.includes(id)),
+                    )
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            )}
+            {errorFor("plannedActivityIds") && (
+              <span role="alert" className="field-error">
+                {errorFor("plannedActivityIds")}
+              </span>
+            )}
+          </fieldset>
+        </Card>
+
+        <Card
+          as="section"
+          title="Limits"
+          subtitle="Optional. Leave blank for no limit. The Schedule check runs only when a travel-time cap is set."
+          headingLevel={3}
+          className="constraints__card"
+        >
+          <div className="constraints__grid">
+            <TextInput
+              label="Walking-distance limit (meters)"
+              type="number"
+              min={1}
+              value={form.walkingDistanceLimitMeters}
+              onChange={(e) => set("walkingDistanceLimitMeters", e.target.value)}
+              error={errorFor("walkingDistanceLimitMeters")}
+            />
+            <TextInput
+              label="Daily travel-time cap (minutes)"
+              type="number"
+              min={1}
+              step={1}
+              value={form.travelTimeCapMinutes}
+              onChange={(e) => set("travelTimeCapMinutes", e.target.value)}
+              error={errorFor("travelTimeCapMinutes")}
+            />
+          </div>
+        </Card>
+
+        <div className="constraints__savebar">
+          <div className="constraints__savebar-status" aria-live="polite">
+            {error ? (
+              <span role="alert" className="field-error">
+                {error}
+              </span>
+            ) : saved ? (
+              <span role="status" className="constraints__saved">
+                Constraints saved.
+              </span>
+            ) : dirty ? (
+              <span className="constraints__muted">Unsaved changes</span>
+            ) : null}
+          </div>
+          <div className="constraints__savebar-actions">
+            {stored && (
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setForm(formFromConstraints(stored));
+                  setFieldErrors([]);
+                  setError(undefined);
+                  setSaved(false);
+                }}
+              >
+                Reset
+              </Button>
+            )}
+            <Button type="submit" variant="primary" loading={busy}>
+              {busy ? "Saving…" : "Save constraints"}
+            </Button>
+          </div>
+        </div>
+      </form>
+      )}
+    </section>
   );
 }

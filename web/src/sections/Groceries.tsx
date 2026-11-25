@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import {
   validatePlanItem,
   type FieldError,
@@ -8,9 +8,32 @@ import {
 } from "@tripwise/shared";
 import { useApiClient } from "../api/ApiClientContext";
 import { createItem, deleteItem, updateItem } from "../api/items";
-import { LastModified, memberName } from "../components/LastModified";
+import { LastModified } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
-import { describeError, errorsFor, Field, type Editing, type MemberOption } from "./planSectionHelpers";
+import {
+  Badge,
+  Card,
+  Checkbox,
+  ConfirmDialog,
+  EmptyState,
+  ProgressBar,
+  Select,
+  TextInput,
+  useToast,
+} from "../ui";
+import {
+  describeError,
+  errorsFor,
+  FormDrawer,
+  ItemActions,
+  MemberChip,
+  memberSelectOptions,
+  SectionHeader,
+  usePendingDelete,
+  type Editing,
+  type MemberOption,
+} from "./planSectionHelpers";
+import "./lists.css";
 
 export type GroceriesItem = PlanItem<GroceriesFields>;
 
@@ -52,6 +75,8 @@ function fieldsFromForm(form: GroceriesForm): Record<string, unknown> {
 
 export function Groceries({ tripId, items, members, onChanged }: GroceriesProps) {
   const client = useApiClient();
+  const toast = useToast();
+  const formId = useId();
   const [editing, setEditing] = useState<Editing | null>(null);
   const [form, setForm] = useState<GroceriesForm>(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
@@ -60,8 +85,10 @@ export function Groceries({ tripId, items, members, onChanged }: GroceriesProps)
   const [stale, setStale] = useState<GroceriesItem | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [toggleStale, setToggleStale] = useState<GroceriesItem | null>(null);
+  const pendingDelete = usePendingDelete<GroceriesItem>();
 
   const memberIds = useMemo(() => new Set((members ?? []).map((m) => m.userId)), [members]);
+  const purchasedCount = items.filter((i) => i.fields.purchased).length;
   const errorFor = (field: string) => errorsFor(fieldErrors, field);
 
   function set<K extends keyof GroceriesForm>(key: K, value: GroceriesForm[K]) {
@@ -119,9 +146,11 @@ export function Groceries({ tripId, items, members, onChanged }: GroceriesProps)
         );
         if (!res.ok) {
           setStale(res.current as GroceriesItem);
+          toast.error("Someone else changed this item. Your changes were not saved.");
           return;
         }
       }
+      toast.success(editing.mode === "create" ? `Added ${result.value.name}.` : `Saved ${result.value.name}.`);
       resetForm();
       await onChanged();
     } catch (err) {
@@ -136,7 +165,6 @@ export function Groceries({ tripId, items, members, onChanged }: GroceriesProps)
   /** Req 8.2: toggling purchased is a normal update, so the server stamps lastModifiedBy/At. */
   async function togglePurchased(item: GroceriesItem, purchased: boolean) {
     setToggling(item.itemId);
-    setError(undefined);
     setToggleStale(null);
     try {
       const res = await updateItem(
@@ -149,149 +177,183 @@ export function Groceries({ tripId, items, members, onChanged }: GroceriesProps)
       );
       if (!res.ok) {
         setToggleStale(res.current as GroceriesItem);
+        toast.error(`${item.fields.name} was changed by someone else. Review the stored version.`);
         return;
       }
       await onChanged();
     } catch (err) {
-      setError(describeError(err).message);
+      toast.error(describeError(err).message);
     } finally {
       setToggling(null);
     }
   }
 
   async function remove(item: GroceriesItem) {
-    if (!window.confirm(`Delete ${item.fields.name}?`)) return;
-    setError(undefined);
     try {
       await deleteItem(client, tripId, "Groceries", item.itemId);
       if (editing?.mode === "edit" && editing.itemId === item.itemId) resetForm();
+      toast.success(`Deleted ${item.fields.name}.`);
       await onChanged();
     } catch (err) {
-      setError(describeError(err).message);
+      toast.error(describeError(err).message);
     }
   }
 
   return (
-    <section aria-labelledby="groceries-heading">
-      <h2 id="groceries-heading">Groceries</h2>
+    <section aria-labelledby="groceries-heading" className="list-section">
+      <SectionHeader
+        id="groceries-heading"
+        title="Groceries"
+        description="Who is buying what for the trip."
+        addLabel="Add grocery item"
+        onAdd={startCreate}
+      />
       {items.length === 0 ? (
-        <p>No groceries yet.</p>
+        <EmptyState
+          title="No groceries yet"
+          description="Add items and assign who is buying each one."
+          headingLevel={3}
+        />
       ) : (
-        <ul>
-          {items.map((item) => {
-            const f = item.fields;
-            return (
-              <li key={item.itemId} className="card">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={f.purchased}
-                    disabled={toggling === item.itemId}
-                    onChange={(e) => void togglePurchased(item, e.target.checked)}
-                  />{" "}
-                  {f.name} × {f.quantity}
-                </label>{" "}
-                <span>· {memberName(f.responsibleMemberId, members)} is buying</span>
-                {f.purchased && <span> · purchased</span>}
-                <div>
-                  <LastModified
-                    lastModifiedBy={item.lastModifiedBy}
-                    lastModifiedAt={item.lastModifiedAt}
-                    members={members}
-                  />
-                </div>
-                {toggleStale?.itemId === item.itemId && (
-                  <StaleConflict
-                    current={toggleStale}
-                    members={members}
-                    onUseCurrent={() => {
-                      setToggleStale(null);
-                      void onChanged();
-                    }}
-                  />
-                )}
-                <div>
-                  <button type="button" onClick={() => startEdit(item)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => void remove(item)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {!editing && error && <p role="alert">{error}</p>}
-      {!editing ? (
-        <button type="button" onClick={startCreate}>
-          Add grocery item
-        </button>
-      ) : (
-        <form onSubmit={(e) => void submit(e)} noValidate>
-          <h3>{editing.mode === "create" ? "Add grocery item" : "Edit grocery item"}</h3>
-          {stale && (
-            <StaleConflict
-              current={stale}
-              members={members}
-              onUseCurrent={(current) => {
-                setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
-                setForm(formFromFields(current.fields));
-                setStale(null);
-              }}
-              onDismiss={() => {
-                // Keep local edits; the next save overwrites the stored version the Member has now seen.
-                setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
-                setStale(null);
-              }}
+        <>
+          <Card className="list-summary">
+            <ProgressBar
+              label="Groceries purchased"
+              value={purchasedCount}
+              max={items.length}
+              tone={purchasedCount === items.length ? "success" : "accent"}
+              valueText={`${purchasedCount} of ${items.length} purchased`}
             />
-          )}
-          <Field label="Item" error={errorFor("name")}>
-            <input value={form.name} onChange={(e) => set("name", e.target.value)} />
-          </Field>
-          <Field label="Quantity" error={errorFor("quantity")}>
-            <input
-              type="number"
-              min={0}
-              step="any"
-              value={form.quantity}
-              onChange={(e) => set("quantity", e.target.value)}
-            />
-          </Field>
-          <Field label="Responsible Member" error={errorFor("responsibleMemberId")}>
-            {members ? (
-              <select value={form.responsibleMemberId} onChange={(e) => set("responsibleMemberId", e.target.value)}>
-                <option value="">Select a Member…</option>
-                {members.map((m) => (
-                  <option key={m.userId} value={m.userId}>
-                    {memberName(m.userId, members)}
-                  </option>
-                ))}
-                {form.responsibleMemberId !== "" && !memberIds.has(form.responsibleMemberId) && (
-                  <option value={form.responsibleMemberId}>{form.responsibleMemberId} (not a Member)</option>
-                )}
-              </select>
-            ) : (
-              <input
-                value={form.responsibleMemberId}
-                onChange={(e) => set("responsibleMemberId", e.target.value)}
-              />
-            )}
-          </Field>
-          <label>
-            <input type="checkbox" checked={form.purchased} onChange={(e) => set("purchased", e.target.checked)} />{" "}
-            Purchased
-          </label>
-          {error && <p role="alert">{error}</p>}
-          <button type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={resetForm} disabled={busy}>
-            Cancel
-          </button>
-        </form>
+          </Card>
+          <ul className="item-list">
+            {items.map((item) => {
+              const f = item.fields;
+              return (
+                <Card
+                  as="li"
+                  compact
+                  key={item.itemId}
+                  className={f.purchased ? "item-card item-card--done" : "item-card"}
+                  footer={
+                    <LastModified
+                      lastModifiedBy={item.lastModifiedBy}
+                      lastModifiedAt={item.lastModifiedAt}
+                      members={members}
+                    />
+                  }
+                >
+                  <div className="item-card__row">
+                    <div className="item-card__main">
+                      <Checkbox
+                        fieldClassName="item-card__check"
+                        label={`${f.name} × ${f.quantity}`}
+                        checked={f.purchased}
+                        disabled={toggling === item.itemId}
+                        onChange={(e) => void togglePurchased(item, e.target.checked)}
+                      />
+                      <div className="item-card__meta">
+                        <MemberChip userId={f.responsibleMemberId} members={members} prefix="Buying:" />
+                        {f.purchased && <Badge tone="success">Purchased</Badge>}
+                      </div>
+                    </div>
+                    <div className="item-card__actions">
+                      <ItemActions
+                        itemLabel={f.name}
+                        onEdit={() => startEdit(item)}
+                        onDelete={() => pendingDelete.request(item)}
+                      />
+                    </div>
+                  </div>
+                  {toggleStale?.itemId === item.itemId && (
+                    <StaleConflict
+                      current={toggleStale}
+                      members={members}
+                      onUseCurrent={() => {
+                        setToggleStale(null);
+                        void onChanged();
+                      }}
+                    />
+                  )}
+                </Card>
+              );
+            })}
+          </ul>
+        </>
       )}
+
+      <FormDrawer
+        open={editing !== null}
+        title={editing?.mode === "edit" ? "Edit grocery item" : "Add grocery item"}
+        formId={formId}
+        busy={busy}
+        error={error}
+        onClose={resetForm}
+        onSubmit={(e) => void submit(e)}
+      >
+        {stale && (
+          <StaleConflict
+            current={stale}
+            members={members}
+            onUseCurrent={(current) => {
+              setEditing({ mode: "edit", itemId: current.itemId, expectedLastModifiedAt: current.lastModifiedAt });
+              setForm(formFromFields(current.fields));
+              setStale(null);
+            }}
+            onDismiss={() => {
+              // Keep local edits; the next save overwrites the stored version the Member has now seen.
+              setEditing({ mode: "edit", itemId: stale.itemId, expectedLastModifiedAt: stale.lastModifiedAt });
+              setStale(null);
+            }}
+          />
+        )}
+        <TextInput
+          label="Item"
+          required
+          data-autofocus
+          value={form.name}
+          error={errorFor("name")}
+          onChange={(e) => set("name", e.target.value)}
+        />
+        <TextInput
+          label="Quantity"
+          type="number"
+          required
+          min={0}
+          step="any"
+          value={form.quantity}
+          error={errorFor("quantity")}
+          onChange={(e) => set("quantity", e.target.value)}
+        />
+        {members ? (
+          <Select
+            label="Responsible Member"
+            required
+            placeholder="Select a Member…"
+            options={memberSelectOptions(members, form.responsibleMemberId)}
+            value={form.responsibleMemberId}
+            error={errorFor("responsibleMemberId")}
+            onChange={(e) => set("responsibleMemberId", e.target.value)}
+          />
+        ) : (
+          <TextInput
+            label="Responsible Member"
+            required
+            value={form.responsibleMemberId}
+            error={errorFor("responsibleMemberId")}
+            onChange={(e) => set("responsibleMemberId", e.target.value)}
+          />
+        )}
+        <Checkbox label="Purchased" checked={form.purchased} onChange={(e) => set("purchased", e.target.checked)} />
+      </FormDrawer>
+
+      <ConfirmDialog
+        open={pendingDelete.target !== null}
+        title={`Delete ${pendingDelete.target?.fields.name ?? "item"}?`}
+        message="This removes the grocery item for everyone on the trip."
+        busy={pendingDelete.busy}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => void pendingDelete.confirm(remove)}
+      />
     </section>
   );
 }

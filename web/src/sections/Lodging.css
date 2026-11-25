@@ -1,0 +1,217 @@
+/* Lodging section (task 20.4). Uses tokens from styles.css only. */
+
+.lodging {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lodging__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.lodging__header h2 {
+  margin: 0;
+}
+
+.lodging__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.lodging__features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* Stay card */
+
+.stay-card--selected {
+  border-color: var(--color-pass-border);
+  box-shadow: 0 0 0 1px var(--color-pass-border), var(--shadow-card);
+}
+
+.stay-card .ui-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.stay-card__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.stay-card__facts dt,
+.stay-card__secret dt {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stay-card__facts dd,
+.stay-card__secret dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.stay-card__facts > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.stay-card__link {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.stay-card__details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.stay-card__secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.stay-card__code {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+}
+
+.stay-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* Drawer form */
+
+.lodging-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.lodging-form__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.lodging-form__group > legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.lodging-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+.lodging-form__linked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Catalog picker cards */
+
+.catalog-picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.catalog-stay {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.catalog-stay:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-raised);
+}
+
+.catalog-stay--picked {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.catalog-stay__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.catalog-stay__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.catalog-stay__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.catalog-stay__price {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+@media (max-width: 600px) {
+  .lodging__list {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,226 @@
+/* Constraints tab. Uses tokens from styles.css. */
+
+.constraints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.constraints__header h2 {
+  margin: 0 0 var(--space-1);
+}
+
+.constraints__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.constraints__unknown {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.constraints__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.constraints__card .ui-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.constraints__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.constraints__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-accent-text);
+}
+
+.constraints__fieldset,
+.constraints__segmented {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.constraints__fieldset > .field__label,
+.constraints__segmented > .field__label {
+  display: block;
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+
+/* Budget type segmented control. */
+.constraints__segments {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+  gap: var(--space-1);
+}
+
+.constraints__segment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.constraints__segment input {
+  accent-color: var(--color-accent);
+}
+
+.constraints__segment--on {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-card);
+}
+
+.constraints__segment:focus-within {
+  box-shadow: var(--focus-ring-shadow);
+}
+
+/* Feature checkboxes as chips. */
+.constraints__features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.constraints__chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+}
+
+.constraints__chip--on {
+  border-color: var(--color-accent-soft-border);
+  background: var(--color-accent-soft);
+}
+
+.constraints__chip:focus-within {
+  border-color: var(--focus-ring-color);
+}
+
+/* Activities as selectable cards. */
+.constraints__activities {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.constraints__activity {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-10);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.constraints__activity:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-raised);
+}
+
+.constraints__activity--on {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.constraints__activity:focus-within {
+  border-color: var(--focus-ring-color);
+  box-shadow: var(--focus-ring-shadow);
+}
+
+.constraints__activity-input {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+}
+
+.constraints__activity-name {
+  font-weight: var(--weight-semibold);
+}
+
+.constraints__activity-price {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Sticky save bar. */
+.constraints__savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-raised);
+}
+
+.constraints__savebar-status {
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.constraints__savebar-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.constraints__saved {
+  color: var(--color-pass);
+  font-weight: var(--weight-medium);
+}
+
+@media (max-width: 600px) {
+  .constraints__savebar {
+    border-radius: var(--radius-md);
+  }
+
+  .constraints__savebar-actions {
+    width: 100%;
+  }
+
+  .constraints__savebar-actions .btn {
+    flex: 1;
+  }
+}
