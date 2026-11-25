@@ -28,6 +28,7 @@ import { Expenses, type ExpensesItem } from "../sections/Expenses";
 import { GenericSection, type GenericItem } from "../sections/GenericSection";
 import { Groceries, type GroceriesItem } from "../sections/Groceries";
 import { Itinerary } from "../sections/Itinerary";
+import { PlaceMap } from "../sections/PlaceMap";
 import { Lodging } from "../sections/Lodging";
 import { countdownText, localToday, shortDate, tripCountdown, TripOverview } from "./TripOverview";
 import "./TripPage.css";
@@ -36,6 +37,7 @@ const TABS = [
   "Overview",
   "Lodging",
   "Itinerary",
+  "Map",
   "Transportation",
   "Groceries",
   "Checklist",
@@ -176,6 +178,16 @@ export function TripPage({ tripId }: { tripId: string }) {
             trip={{ startDate: trip.startDate, endDate: trip.endDate }}
             items={itemsBySection.Itinerary as unknown as ItineraryItem[]}
             members={members}
+            onChanged={onChanged}
+          />
+        );
+      case "Map":
+        return (
+          <PlaceMap
+            tripId={tripId}
+            trip={{ destination: trip.destination, startDate: trip.startDate, endDate: trip.endDate }}
+            items={itemsBySection.Itinerary as unknown as ItineraryItem[]}
+            lodging={itemsBySection.Lodging as unknown as LodgingItem[]}
             onChanged={onChanged}
           />
         );
