@@ -133,13 +133,7 @@ describe('drafts handler', () => {
     expect(user).not.toContain('Traveler count');
 
     const drafts = res.body.drafts;
-    expect(drafts.map((d: { section: string }) => d.section)).toEqual([
-      'Groceries',
-      'Checklist',
-      'Reservations',
-      'Transportation',
-      'Itinerary',
-    ]);
+    expect(drafts.map((d: { section: string }) => d.section)).toEqual(['Groceries', 'Reservations']);
     expect(drafts[0]).toEqual({
       draftId: 'd1',
       section: 'Groceries',
@@ -147,15 +141,11 @@ describe('drafts handler', () => {
       valid: true,
       errors: [],
     });
-    expect(drafts[1]).toMatchObject({ fields: { task: 'Pack sunscreen' }, valid: true, suggestedClaimedBy: 'host' });
-    expect(drafts[2]).toMatchObject({ fields: { title: 'Boat tour', costCents: 4500 }, valid: true });
-    expect(drafts[3]).toMatchObject({ fields: { title: 'Taxi' }, valid: true });
-    expect(drafts[4].valid).toBe(false);
-    expect(drafts[4].errors.map((e: { field: string }) => e.field)).toContain('day');
+    expect(drafts[1]).toMatchObject({ fields: { title: 'Boat tour', costCents: 4500 }, valid: true });
 
     expect(writes()).toEqual([]);
     expect(addMetric).toHaveBeenCalledWith('DraftRequestCount', MetricUnit.Count, 1);
-    expect(addMetric).toHaveBeenCalledWith('DraftItemCount', MetricUnit.Count, 5);
+    expect(addMetric).toHaveBeenCalledWith('DraftItemCount', MetricUnit.Count, 2);
     expect(lines.join('\n')).not.toContain('Buy eggs');
   });
 

@@ -37,6 +37,7 @@ locals {
     items = [
       [["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"], local.table_arns],
       [["s3:PutObject", "s3:GetObject"], [local.private_trips]],
+      [["bedrock:InvokeModel"], [local.model_arn]],
     ]
     catalog = [
       [["s3:GetObject"], [local.catalog_objects]],

@@ -6,6 +6,7 @@ import {
   DraftRequestSchema,
   MAX_DRAFT_ITEMS,
   buildDraftPrompt,
+  draftIsAboutNotes,
   filterDraftSections,
   groundDraftCosts,
   parseDraftResponse,
@@ -20,12 +21,24 @@ const input: DraftPromptInput = {
   memberNames: ['Sam', 'Alex'],
 };
 
+describe('draftIsAboutNotes', () => {
+  it('keeps the beach and drops the invented arrival plan', () => {
+    const notes = 'I want to go to the beach';
+    expect(draftIsAboutNotes({ stopName: 'Beach' }, notes)).toBe(true);
+    expect(draftIsAboutNotes({ stopName: 'Mission Beach' }, notes)).toBe(true);
+    expect(draftIsAboutNotes({ stopName: 'Land at the airport' }, notes)).toBe(false);
+    expect(draftIsAboutNotes({ name: 'Sunscreen' }, notes)).toBe(false);
+    expect(draftIsAboutNotes({ task: 'Check into the hotel' }, notes)).toBe(false);
+  });
+});
+
 describe('buildDraftPrompt', () => {
   it('includes the JSON instruction, fields, example, trip facts, names, and delimited notes', () => {
     const { system, user } = buildDraftPrompt(input);
     expect(system).toMatch(/Return only JSON/);
     expect(system).toContain('"section":"Groceries"');
     expect(system).toMatch(/Do not invent prices/);
+    expect(system).toMatch(/Do not fill sections the notes do not mention/);
     expect(user).toContain('San Diego');
     expect(user).toContain('2025-06-12');
     expect(user).toContain('2025-06-16');

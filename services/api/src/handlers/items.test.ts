@@ -8,7 +8,7 @@ import { routes, type ItemsDeps } from './items.js';
 
 const ITEMS = '/trips/{tripId}/sections/{section}/items';
 
-async function setup() {
+async function setup(locatePlace?: ItemsDeps['locatePlace']) {
   const repos = createMemoryRepos();
   await repos.trips.create(
     {
@@ -46,6 +46,7 @@ async function setup() {
       new S3Client({ region: 'us-west-2', credentials: { accessKeyId: 'AKID', secretAccessKey: 'secret' } }),
       'data-bucket',
     ),
+    locatePlace: locatePlace ?? (async () => null),
   };
   const handler = dispatch(routes, () => deps);
   const call = async (
@@ -132,6 +133,57 @@ describe('items handler', () => {
 
     const again = await call(claimKey, 'host', { itemId: 'item1' });
     expect(again).toEqual({ status: 409, body: { error: 'ALREADY_CLAIMED', claimedBy: 'member' } });
+  });
+
+  it('stores an expense split and an itinerary pin for every member to read', async () => {
+    const { call } = await setup();
+    const expense = await call(`POST ${ITEMS}`, 'host', { section: 'Expenses' }, {
+      fields: {
+        payerMemberId: 'host',
+        amount: '30.00',
+        purpose: 'Dinner',
+        splits: [
+          { memberId: 'host', amount: '10.00' },
+          { memberId: 'member', amount: '20.00' },
+        ],
+      },
+    });
+    expect(expense.status).toBe(201);
+    expect(expense.body.fields).toEqual({
+      payerMemberId: 'host',
+      amountCents: 3000,
+      purpose: 'Dinner',
+      splits: [
+        { memberId: 'host', amountCents: 1000 },
+        { memberId: 'member', amountCents: 2000 },
+      ],
+    });
+    const listedExpenses = await call(`GET ${ITEMS}`, 'member', { section: 'Expenses' });
+    expect(listedExpenses.body.items).toEqual([expense.body]);
+
+    const pin = await call(`POST ${ITEMS}`, 'member', { section: 'Itinerary' }, {
+      fields: { day: '2025-06-02', startTime: '10:00', stopName: 'Balboa Park', lat: 32.73, lng: -117.14 },
+    });
+    expect(pin.status).toBe(201);
+    const listedPins = await call(`GET ${ITEMS}`, 'host', { section: 'Itinerary' });
+    expect(listedPins.body.items[0].fields).toMatchObject({ stopName: 'Balboa Park', lat: 32.73, lng: -117.14 });
+
+    const half = await call(`POST ${ITEMS}`, 'host', { section: 'Itinerary' }, {
+      fields: { day: '2025-06-02', startTime: '11:00', stopName: 'Zoo', lat: 32.7 },
+    });
+    expect(half.status).toBe(400);
+    expect(half.body.fields.map((f: { field: string }) => f.field)).toContain('lng');
+  });
+
+  it('looks up a pin when a new stop is saved without coordinates', async () => {
+    const { call } = await setup(async () => ({ lat: 32.731, lng: -117.145 }));
+    const created = await call(`POST ${ITEMS}`, 'member', { section: 'Itinerary' }, {
+      fields: { day: '2025-06-02', startTime: '10:00', stopName: 'Balboa Park' },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.fields).toMatchObject({ stopName: 'Balboa Park', lat: 32.731, lng: -117.145 });
+    const seen = await call(`GET ${ITEMS}`, 'host', { section: 'Itinerary' });
+    expect(seen.body.items[0].fields).toMatchObject({ lat: 32.731, lng: -117.145 });
   });
 
   it('denies non-members', async () => {

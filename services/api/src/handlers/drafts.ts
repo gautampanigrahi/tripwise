@@ -4,6 +4,7 @@ import {
   MAX_DRAFT_ITEMS,
   MAX_DRAFT_NOTES,
   buildDraftPrompt,
+  draftIsAboutNotes,
   filterDraftSections,
   groundDraftCosts,
   parseDraftResponse,
@@ -181,6 +182,7 @@ async function createDrafts(req: Req): Promise<HttpResult> {
       memberIds: new Set(members.map((m) => m.userId)),
     };
     const drafts: DraftItem[] = filterDraftSections(parsed.items)
+      .filter((entry) => draftIsAboutNotes(entry.fields, notes))
       .slice(0, MAX_DRAFT_ITEMS)
       .map((entry) => {
         const people = resolvePeople(entry.section, entry.fields, members);

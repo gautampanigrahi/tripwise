@@ -77,6 +77,13 @@ describe('validatePlanItem: rule violations', () => {
     expect(fieldsOf('Itinerary', { ...itinerary, day: '2025-07-15' })).toEqual(['day']);
   });
 
+  it('Itinerary: stores a map pin and requires both coordinates', () => {
+    const r = validatePlanItem('Itinerary', { ...itinerary, lat: 32.73, lng: -117.14 }, ctx);
+    expect(r.ok && r.value).toMatchObject({ lat: 32.73, lng: -117.14, stopName: 'Balboa Park' });
+    expect(fieldsOf('Itinerary', { ...itinerary, lat: 32.73 })).toEqual(['lng']);
+    expect(fieldsOf('Itinerary', { ...itinerary, lat: 91, lng: 0 })).toEqual(['lat']);
+  });
+
   it('Itinerary: end time before start time (7.3), equal is allowed', () => {
     expect(fieldsOf('Itinerary', { ...itinerary, endTime: '08:59' })).toEqual(['endTime']);
     expect(fieldsOf('Itinerary', { ...itinerary, endTime: '09:00' })).toEqual([]);
@@ -104,6 +111,61 @@ describe('validatePlanItem: rule violations', () => {
 
   it('Expenses: payer must be a Member', () => {
     expect(fieldsOf('Expenses', { ...expense, payerMemberId: 'u-stranger' })).toEqual(['payerMemberId']);
+  });
+
+  it('Expenses: stores each share in cents when the shares add up', () => {
+    const r = validatePlanItem(
+      'Expenses',
+      {
+        ...expense,
+        amount: '10.00',
+        splits: [
+          { memberId: 'u-host', amount: '4.00' },
+          { memberId: 'u-ana', amount: '6.00' },
+        ],
+      },
+      ctx,
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: {
+        payerMemberId: 'u-host',
+        amountCents: 1000,
+        purpose: 'Dinner',
+        splits: [
+          { memberId: 'u-host', amountCents: 400 },
+          { memberId: 'u-ana', amountCents: 600 },
+        ],
+      },
+    });
+  });
+
+  it('Expenses: shares must add up, name Members, and list each person once', () => {
+    expect(
+      fieldsOf('Expenses', {
+        ...expense,
+        amount: '10.00',
+        splits: [
+          { memberId: 'u-host', amount: '4.00' },
+          { memberId: 'u-ana', amount: '5.00' },
+        ],
+      }),
+    ).toEqual(['splits']);
+    expect(
+      fieldsOf('Expenses', {
+        ...expense,
+        splits: [{ memberId: 'u-stranger', amount: '42.50' }],
+      }),
+    ).toEqual(['splits.0.memberId']);
+    expect(
+      fieldsOf('Expenses', {
+        ...expense,
+        splits: [
+          { memberId: 'u-ana', amount: '20.00' },
+          { memberId: 'u-ana', amount: '20.00' },
+        ],
+      }),
+    ).toEqual(['splits', 'splits.1.memberId']);
   });
 
   it('reports every invalid field together, including context rules (5.6)', () => {

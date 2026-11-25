@@ -11,7 +11,6 @@ import {
   driveNote,
   mergeNotes,
   nextStartTime,
-  pinNote,
   placeQuery,
   readPin,
   stayQuery,
@@ -152,7 +151,11 @@ export function PlaceMap({ tripId, trip, items, lodging, onChanged }: PlaceMapPr
             : null,
         );
         for (const item of sortedItems(items)) {
-          const hit = readPin(item.fields.notes) ?? (await geocode(placeQuery(item.fields.stopName, trip.destination)));
+          const stored =
+            item.fields.lat !== undefined && item.fields.lng !== undefined
+              ? { lat: item.fields.lat, lng: item.fields.lng }
+              : readPin(item.fields.notes);
+          const hit = stored ?? (await geocode(placeQuery(item.fields.stopName, trip.destination)));
           if (cancelled) return;
           if (!hit) {
             missing.push(item.fields.stopName);
@@ -243,7 +246,8 @@ export function PlaceMap({ tripId, trip, items, lodging, onChanged }: PlaceMapPr
         day: trip.startDate,
         startTime,
         stopName: hit.name,
-        notes: pinNote(hit.lat, hit.lng),
+        lat: hit.lat,
+        lng: hit.lng,
       };
       await createItem(client, tripId, "Itinerary", fields);
       setHits([]);
@@ -299,7 +303,7 @@ export function PlaceMap({ tripId, trip, items, lodging, onChanged }: PlaceMapPr
         const index = route.order.findIndex((place) => place.id === stop.id);
         const incoming = index > 0 ? route.legs[index - 1] : undefined;
         const notes = mergeNotes(stop.notes, driveNote(incoming, route.order[index - 1]?.kind === "stay"));
-        const fields: ItineraryFields = { day, startTime: time, stopName: stop.name };
+        const fields: ItineraryFields = { day, startTime: time, stopName: stop.name, lat: stop.lat, lng: stop.lng };
         if (stop.endTime) fields.endTime = stop.endTime;
         if (notes) fields.notes = notes;
         if (!stop.itemId || !stop.lastModifiedAt) continue;

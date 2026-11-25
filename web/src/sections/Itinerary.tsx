@@ -33,6 +33,9 @@ interface ItineraryForm {
   endTime: string;
   stopName: string;
   notes: string;
+  /** Kept so editing a stop does not wipe the pin everyone else sees. */
+  lat?: number;
+  lng?: number;
 }
 
 const EMPTY_FORM: ItineraryForm = { day: "", startTime: "", endTime: "", stopName: "", notes: "" };
@@ -44,6 +47,8 @@ function formFromFields(f: ItineraryFields): ItineraryForm {
     endTime: f.endTime ?? "",
     stopName: f.stopName,
     notes: f.notes ?? "",
+    lat: f.lat,
+    lng: f.lng,
   };
 }
 
@@ -56,6 +61,10 @@ function fieldsFromForm(form: ItineraryForm): Record<string, unknown> {
   };
   if (form.endTime !== "") out.endTime = form.endTime;
   if (form.notes.trim() !== "") out.notes = form.notes.trim();
+  if (form.lat !== undefined && form.lng !== undefined) {
+    out.lat = form.lat;
+    out.lng = form.lng;
+  }
   return out;
 }
 
@@ -334,6 +343,7 @@ export function Itinerary({ tripId, trip, items, members, onChanged }: Itinerary
           )}
           <TextInput
             label="Stop name"
+            hint="A new stop is looked up and added to the map for everyone on the trip."
             required
             value={form.stopName}
             error={errorFor("stopName")}

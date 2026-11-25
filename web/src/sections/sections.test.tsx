@@ -89,7 +89,20 @@ describe("Checklist", () => {
 describe("Expenses", () => {
   const items: ExpensesItem[] = [
     { ...stamp, itemId: "e1", section: "Expenses", fields: { payerMemberId: "u-ana", amountCents: 12000, purpose: "Groceries" } },
-    { ...stamp, itemId: "e2", section: "Expenses", fields: { payerMemberId: "u-ben", amountCents: 4550, purpose: "Gas" } },
+    {
+      ...stamp,
+      itemId: "e2",
+      section: "Expenses",
+      fields: {
+        payerMemberId: "u-ben",
+        amountCents: 4550,
+        purpose: "Gas",
+        splits: [
+          { memberId: "u-ana", amountCents: 2000 },
+          { memberId: "u-ben", amountCents: 2550 },
+        ],
+      },
+    },
     { ...stamp, itemId: "e3", section: "Expenses", fields: { payerMemberId: "u-ana", amountCents: 1000, purpose: "Ice" } },
   ];
 
@@ -99,6 +112,8 @@ describe("Expenses", () => {
     expect(html).toContain("$130.00");
     expect(html).toContain("$45.50");
     expect(html).toContain("Share paid by Ben Okafor");
+    expect(html).toContain("Ana Ruiz owes $20.00");
+    expect(html).toContain("Ana Ruiz owes Ben Okafor $20.00");
     expect(html).not.toMatch(/>\s*(Pay|Settle|Send|Request)[^<]*</i);
   });
 });

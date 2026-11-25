@@ -14,6 +14,7 @@ export {
   buildDraftPrompt,
   parseDraftResponse,
   filterDraftSections,
+  draftIsAboutNotes,
   resolveMemberName,
   groundDraftCosts,
 } from './drafting.js';

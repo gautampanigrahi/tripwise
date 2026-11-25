@@ -29,9 +29,10 @@ locals {
       timeout = 10
       env     = merge(local.base_env, { TOPIC_ARN = aws_sns_topic.notifications.arn, APP_URL = local.app_url })
     }
+    # items-fn may ask the model for a map search, then store the coordinates it finds.
     items = {
-      timeout = 10
-      env     = merge(local.base_env, { DATA_BUCKET = aws_s3_bucket.data.bucket })
+      timeout = 20
+      env     = merge(local.base_env, { DATA_BUCKET = aws_s3_bucket.data.bucket, MODEL_ID = var.model_id })
     }
     catalog = {
       timeout = 10

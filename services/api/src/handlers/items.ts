@@ -1,4 +1,5 @@
 import { confirmationKey, parseSection, stamp, validatePlanItem, type PlanItem, type Section } from '@tripwise/shared';
+import { locatePlace, type PlaceLookup, type PlacePoint } from '../adapters/placeLocate.js';
 import { createS3ConfirmationStore, type ConfirmationStore } from '../adapters/s3.js';
 import { HttpError, json, type HttpResult } from '../lib/http.js';
 import { dispatch, type ApiEvent, type RouteDef, type RouteRequest } from '../lib/routes.js';
@@ -9,7 +10,13 @@ import type { Repos } from '../repos/interfaces.js';
  * items-fn: Plan_Item CRUD and Checklist claim (Req 5.1-5.6, 8.2, 9.2-9.4, 23.2, 23.3).
  * Also Lodging confirmation upload/download via presigned S3 URLs (Req 6.4, 6.5).
  */
-export type ItemsDeps = Repos & { now: () => string; newId: () => string; files: ConfirmationStore };
+export type ItemsDeps = Repos & {
+  now: () => string;
+  newId: () => string;
+  files: ConfirmationStore;
+  /** Fills a missing itinerary pin. Defaults to the model-assisted map search. */
+  locatePlace?: (input: PlaceLookup) => Promise<PlacePoint | null>;
+};
 
 type Req = RouteRequest<ItemsDeps>;
 
@@ -62,6 +69,30 @@ async function validFields(req: Req, tripId: string, section: Section, fields: u
   return result.value as Record<string, unknown>;
 }
 
+/** When a new stop has no pin, look one up and store it so the map is the same for every member. */
+async function withPin(req: Req, tripId: string, section: Section, fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (section !== 'Itinerary') return fields;
+  const lat = fields.lat;
+  const lng = fields.lng;
+  if (typeof lat === 'number' && typeof lng === 'number') return fields;
+  const stopName = typeof fields.stopName === 'string' ? fields.stopName : '';
+  if (!stopName.trim()) return fields;
+  const trip = await req.deps.trips.get(tripId);
+  if (!trip) return fields;
+  const locate = req.deps.locatePlace ?? locatePlace;
+  try {
+    const hit = await locate({
+      stopName,
+      notes: typeof fields.notes === 'string' ? fields.notes : undefined,
+      destination: trip.destination,
+    });
+    if (!hit) return fields;
+    return { ...fields, lat: hit.lat, lng: hit.lng };
+  } catch {
+    return fields;
+  }
+}
+
 async function listItems(req: Req): Promise<HttpResult> {
   const items = await req.deps.planItems.list(req.tripId!, sectionOf(req.event));
   return json(200, { items });
@@ -70,7 +101,7 @@ async function listItems(req: Req): Promise<HttpResult> {
 async function createItem(req: Req): Promise<HttpResult> {
   const tripId = req.tripId!;
   const section = sectionOf(req.event);
-  const fields = await validFields(req, tripId, section, bodyOf(req.event).fields);
+  const fields = await withPin(req, tripId, section, await validFields(req, tripId, section, bodyOf(req.event).fields));
   const now = req.deps.now();
   const item: PlanItem = stamp(
     { tripId, itemId: req.deps.newId(), section, fields, createdAt: now },
@@ -90,7 +121,7 @@ async function updateItem(req: Req): Promise<HttpResult> {
   if (typeof expected !== 'string' || expected === '') {
     throw validationError('expectedLastModifiedAt', 'Is required');
   }
-  const fields = await validFields(req, tripId, section, body.fields);
+  const fields = await withPin(req, tripId, section, await validFields(req, tripId, section, body.fields));
   const now = req.deps.now();
   // createdAt and server-owned fields are kept from the stored item by the repo (applyUpdate).
   const next: PlanItem = stamp({ tripId, itemId, section, fields, createdAt: now }, req.caller.userId, () => now);
@@ -163,6 +194,7 @@ export const handler = dispatch(routes, () => {
     now: () => new Date().toISOString(),
     newId: () => globalThis.crypto.randomUUID(),
     files: createS3ConfirmationStore(),
+    locatePlace,
   };
   return deps;
 });

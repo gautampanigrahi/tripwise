@@ -103,6 +103,17 @@ export const ItinerarySchema = z
     endTime: TimeSchema.optional(),
     stopName: nonEmpty,
     notes: z.string().optional(),
+    /** Map pin. Both are stored when a place was chosen on the map; a typed stop can omit them. */
+    lat: z
+      .number()
+      .gte(-90, { error: 'Must be between -90 and 90' })
+      .lte(90, { error: 'Must be between -90 and 90' })
+      .optional(),
+    lng: z
+      .number()
+      .gte(-180, { error: 'Must be between -180 and 180' })
+      .lte(180, { error: 'Must be between -180 and 180' })
+      .optional(),
   });
 
 export const GroceriesSchema = z
@@ -123,18 +134,41 @@ export const ChecklistSchema = z
     done: z.boolean().default(false),
   });
 
-/** Accepts `amount` as a dollar string and stores it as integer `amountCents` (Req 10.2). */
+const SplitInputSchema = z.strictObject({
+  memberId: nonEmpty,
+  amount: AmountSchema,
+});
+
+/**
+ * Accepts `amount` as a dollar string and stores it as integer `amountCents` (Req 10.2).
+ * Optional `splits` are each person's share of that amount, also stored as cents.
+ */
 export const ExpensesSchema = z
   .strictObject({
     payerMemberId: nonEmpty,
     amount: AmountSchema,
     purpose: nonEmpty,
+    splits: z.array(SplitInputSchema).min(1).optional(),
   })
-  .transform(({ payerMemberId, amount, purpose }) => ({
-    payerMemberId,
-    amountCents: dollarsToCents(amount) as number,
-    purpose,
-  }));
+  .transform(({ payerMemberId, amount, purpose, splits }) => {
+    const value: {
+      payerMemberId: string;
+      amountCents: number;
+      purpose: string;
+      splits?: { memberId: string; amountCents: number }[];
+    } = {
+      payerMemberId,
+      amountCents: dollarsToCents(amount) as number,
+      purpose,
+    };
+    if (splits) {
+      value.splits = splits.map((split) => ({
+        memberId: split.memberId,
+        amountCents: dollarsToCents(split.amount) as number,
+      }));
+    }
+    return value;
+  });
 
 /** Transportation, Reservations, ScratchPad. */
 export const GenericSchema = z
@@ -210,6 +244,13 @@ function contextErrors(section: Section, raw: Raw, ctx: ValidationContext): Fiel
       if (isTime(raw.startTime) && isTime(raw.endTime) && raw.endTime < raw.startTime) {
         errors.push({ field: 'endTime', message: 'End time must not be earlier than start time' });
       }
+      {
+        const latSet = typeof raw.lat === 'number' && Number.isFinite(raw.lat);
+        const lngSet = typeof raw.lng === 'number' && Number.isFinite(raw.lng);
+        if (latSet !== lngSet) {
+          errors.push({ field: latSet ? 'lng' : 'lat', message: 'Latitude and longitude must both be set' });
+        }
+      }
       break;
     case 'Groceries':
       if (isId(raw.responsibleMemberId) && !ctx.memberIds.has(raw.responsibleMemberId.trim())) {
@@ -219,6 +260,38 @@ function contextErrors(section: Section, raw: Raw, ctx: ValidationContext): Fiel
     case 'Expenses':
       if (isId(raw.payerMemberId) && !ctx.memberIds.has(raw.payerMemberId.trim())) {
         errors.push({ field: 'payerMemberId', message: 'Must be a Member of the Trip' });
+      }
+      if (Array.isArray(raw.splits)) {
+        const seen = new Set<string>();
+        let sum = 0;
+        let amountsOk = true;
+        raw.splits.forEach((row, index) => {
+          if (!row || typeof row !== 'object') return;
+          const split = row as Raw;
+          if (isId(split.memberId)) {
+            const memberId = split.memberId.trim();
+            if (!ctx.memberIds.has(memberId)) {
+              errors.push({ field: `splits.${index}.memberId`, message: 'Must be a Member of the Trip' });
+            }
+            if (seen.has(memberId)) {
+              errors.push({ field: `splits.${index}.memberId`, message: 'Each person can only be included once' });
+            }
+            seen.add(memberId);
+          }
+          if (typeof split.amount === 'string' && AmountSchema.safeParse(split.amount).success) {
+            sum += dollarsToCents(split.amount) ?? 0;
+          } else {
+            amountsOk = false;
+          }
+        });
+        if (
+          amountsOk &&
+          typeof raw.amount === 'string' &&
+          AmountSchema.safeParse(raw.amount).success &&
+          sum !== dollarsToCents(raw.amount)
+        ) {
+          errors.push({ field: 'splits', message: 'Shares must add up to the expense amount' });
+        }
       }
       break;
     default:

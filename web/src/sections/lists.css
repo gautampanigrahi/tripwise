@@ -78,6 +78,50 @@
   grid-column: 1 / -1;
 }
 
+.owe-list,
+.split-shares {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.split-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.split-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5rem;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.split-list__amount {
+  width: 100%;
+}
+
+.split-list__row .field-error {
+  grid-column: 1 / -1;
+}
+
+.split-list__sum {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
 /* Item cards */
 .item-list {
   list-style: none;

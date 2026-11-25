@@ -66,11 +66,16 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
     'You turn rough trip-planning notes into draft plan items.',
     'Return only JSON: an array of objects {"section": <one of the listed sections>, "fields": { ... }}. No prose and no Markdown.',
     'Use only the listed sections and only the listed field names for each section.',
+    'Create an item only when the notes explicitly mention that thing. One mentioned thing is one item.',
+    'Do not fill sections the notes do not mention, and do not invent extra stops, groceries, tasks, reservations, or rides.',
+    'Do not plan the flight, the landing, the hotel, meals, or the rest of the day unless the notes say so.',
+    'The destination and trip dates are only for filling in a date the notes already imply.',
+    'If the notes do not name a plan item, return [].',
     'Use YYYY-MM-DD dates within the trip dates and HH:mm 24-hour times.',
     'When a field names a person, use a Member display name from the list exactly as written.',
     'Give costCents (integer cents) only when the notes state a price. Do not invent prices.',
     `Return at most ${MAX_DRAFT_ITEMS} items.`,
-    `Example: ${SCHEMA_EXAMPLE}`,
+    `Example of the shape only. Do not copy these places or items unless the notes say them: ${SCHEMA_EXAMPLE}`,
   ].join('\n');
 
   const facts = [
@@ -158,6 +163,38 @@ export function parseDraftResponse(
 }
 
 const DRAFTING_SET: ReadonlySet<string> = new Set(DRAFTING_SECTIONS);
+
+const NOTE_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'when', 'want', 'going', 'gonna', 'wanna',
+  'have', 'just', 'some', 'into', 'onto', 'then', 'than', 'them', 'they', 'their', 'your', 'you',
+  'our', 'are', 'was', 'were', 'will', 'can', 'could', 'would', 'should', 'please', 'lets', 'let',
+  'also', 'really', 'very', 'like', 'there', 'here', 'out', 'get', 'got', 'but', 'not',
+]);
+
+function noteWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((word) => word.length > 2 && !NOTE_STOPWORDS.has(word));
+}
+
+/**
+ * True when a draft repeats something the notes actually said.
+ * "I want to go to the beach" keeps a beach stop and drops an invented landing plan.
+ */
+export function draftIsAboutNotes(fields: Record<string, unknown>, notes: string): boolean {
+  const noted = noteWords(notes);
+  if (noted.length === 0) return false;
+  const said = noteWords(
+    Object.values(fields)
+      .filter((value): value is string => typeof value === 'string')
+      .join(' '),
+  );
+  return said.some((word) =>
+    noted.some((note) => word === note || (word.length >= 4 && note.length >= 4 && (word.startsWith(note) || note.startsWith(word)))),
+  );
+}
 
 /** Keeps only items in a Drafting_Section, in order (Req 22.9). Apply before the 20-item cap. */
 export function filterDraftSections<T extends { section: string }>(items: T[]): Array<T & { section: DraftingSection }> {

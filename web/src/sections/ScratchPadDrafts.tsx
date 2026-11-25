@@ -325,7 +325,7 @@ export function ScratchPadDrafts({ tripId, selectedIds, members, trip, currentUs
       <Card
         className="draft-ai"
         title="Draft with AI"
-        subtitle="Turn selected Scratch pad items or your own notes into draft items you can review before saving."
+        subtitle="Suggestions come only from the notes you select or type. Review them before anything is saved."
       >
         <div className="draft-ai__body">
           <p className="draft-ai__selection">
@@ -434,7 +434,7 @@ export function DraftList({
   onDiscard = noop,
 }: DraftListProps) {
   if (groups.length === 0) {
-    return <EmptyState title="No drafts left" description="Every draft was added or discarded." />;
+    return <EmptyState title="Nothing to approve" description="Only a place or task named in the note shows up here." />;
   }
   return (
     <div className="draft-list">

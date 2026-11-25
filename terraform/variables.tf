@@ -40,7 +40,7 @@ variable "enabled_checks" {
 }
 
 variable "model_id" {
-  description = "Bedrock model ID used by explain-fn (MODEL_ID)."
+  description = "Bedrock model ID used by explain-fn, drafts-fn, and the itinerary pin lookup (MODEL_ID)."
   type        = string
   default     = "amazon.nova-lite-v1:0"
 }
