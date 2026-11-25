@@ -1,0 +1,32 @@
+{
+  "name": "tripwise",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/engine",
+    "packages/grounding",
+    "services/api",
+    "web",
+    "scripts"
+  ],
+  "scripts": {
+    "test": "vitest --run",
+    "build:lambdas": "node scripts/build-lambdas.mjs",
+    "deploy": "bash scripts/deploy.sh",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "fast-check": "^3.23.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.12",
+    "zod": "^4.6.7"
+  }
+}

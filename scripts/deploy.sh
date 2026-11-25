@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Builds and deploys TripWise with Terraform.
+#
+# Usage: scripts/deploy.sh [extra terraform apply args, e.g. -auto-approve -var region=us-west-2]
+#
+# Steps: bundle the Lambdas, terraform apply, write web/.env.local from the outputs,
+# build the web app, upload web/dist and catalog/, then invalidate the CloudFront cache.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+for cmd in terraform aws npm; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "error: '$cmd' is not installed or not on PATH" >&2; exit 1; }
+done
+
+echo "==> Building Lambda bundles"
+npm run build:lambdas
+
+echo "==> Applying Terraform"
+terraform -chdir=terraform init -input=false
+terraform -chdir=terraform apply "$@"
+
+out() { terraform -chdir=terraform output -raw "$1"; }
+
+APP_URL="$(out AppUrl)"
+WEB_BUCKET="$(out WebBucketName)"
+DATA_BUCKET="$(out DataBucketName)"
+DISTRIBUTION_ID="$(out DistributionId)"
+USER_POOL_ID="$(out UserPoolId)"
+TABLE_NAME="$(out TableName)"
+REMINDER_FUNCTION_ARN="$(out ReminderFunctionArn)"
+SCHEDULER_ROLE_ARN="$(out SchedulerRoleArn)"
+# The web app expects the Hosted UI domain without a scheme.
+COGNITO_DOMAIN="$(out CognitoDomain)"
+COGNITO_DOMAIN="${COGNITO_DOMAIN#https://}"
+
+echo "==> Writing web/.env.local"
+cat > web/.env.local <<EOF
+VITE_USER_POOL_ID=${USER_POOL_ID}
+VITE_USER_POOL_CLIENT_ID=$(out UserPoolClientId)
+VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
+VITE_API_URL=$(out ApiUrl)
+EOF
+
+echo "==> Building web app"
+npm run build -w web
+
+echo "==> Uploading web app to s3://${WEB_BUCKET}"
+aws s3 sync web/dist "s3://${WEB_BUCKET}" --delete
+
+echo "==> Uploading catalog to s3://${DATA_BUCKET}/catalog/"
+aws s3 sync catalog "s3://${DATA_BUCKET}/catalog/"
+
+echo "==> Invalidating CloudFront distribution ${DISTRIBUTION_ID}"
+aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*" >/dev/null
+
+cat <<EOF
+
+Deployed: ${APP_URL}
+
+Seed the demo trip with:
+  USER_POOL_ID=${USER_POOL_ID} \\
+  TABLE_NAME=${TABLE_NAME} \\
+  REMINDER_FUNCTION_ARN=${REMINDER_FUNCTION_ARN} \\
+  SCHEDULER_ROLE_ARN=${SCHEDULER_ROLE_ARN} \\
+  npm run seed -w scripts
+EOF

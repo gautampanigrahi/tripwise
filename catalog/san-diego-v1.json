@@ -1,0 +1,490 @@
+{
+  "version": "san-diego-v1",
+  "city": "San Diego",
+  "stays": [
+    {
+      "id": "sd-gaslamp-studio",
+      "name": "Gaslamp Studio Loft",
+      "address": "500 Fifth Ave, San Diego, CA 92101",
+      "sleeps": 2,
+      "nightlyPrice": {
+        "cents": 18000,
+        "estimatedAsOf": "2025-01-15"
+      },
+      "features": {
+        "wifi": true,
+        "kitchen": false,
+        "parking": false,
+        "pool": false,
+        "petFriendly": false,
+        "walkableNightlife": true
+      }
+    },
+    {
+      "id": "sd-northpark-house",
+      "name": "North Park Craftsman House",
+      "address": "3000 Upas St, San Diego, CA 92104",
+      "sleeps": 6,
+      "nightlyPrice": {
+        "cents": 45000,
+        "estimatedAsOf": "2025-01-15"
+      },
+      "features": {
+        "wifi": true,
+        "kitchen": true,
+        "parking": true,
+        "pool": false,
+        "petFriendly": true,
+        "walkableNightlife": true
+      }
+    },
+    {
+      "id": "sd-mission-beach-condo",
+      "name": "Mission Beach Oceanfront Condo",
+      "address": "3700 Ocean Front Walk, San Diego, CA 92109",
+      "sleeps": 4,
+      "nightlyPrice": {
+        "cents": 38000,
+        "estimatedAsOf": "2025-01-15"
+      },
+      "features": {
+        "wifi": true,
+        "kitchen": true,
+        "parking": true,
+        "pool": false,
+        "petFriendly": false,
+        "walkableNightlife": false
+      }
+    },
+    {
+      "id": "sd-la-jolla-suite",
+      "name": "La Jolla Village Suite",
+      "address": "7900 Girard Ave, La Jolla, CA 92037",
+      "sleeps": 3,
+      "nightlyPrice": {
+        "cents": 29000,
+        "estimatedAsOf": "2025-01-15"
+      },
+      "features": {
+        "wifi": true,
+        "kitchen": false,
+        "parking": true,
+        "pool": true,
+        "petFriendly": false,
+        "walkableNightlife": false
+      }
+    }
+  ],
+  "activities": [
+    {
+      "id": "sd-balboa-park",
+      "name": "Balboa Park",
+      "pricePerPerson": {
+        "cents": 0,
+        "estimatedAsOf": "2025-01-15"
+      }
+    },
+    {
+      "id": "sd-zoo",
+      "name": "San Diego Zoo",
+      "pricePerPerson": {
+        "cents": 7900,
+        "estimatedAsOf": "2025-01-15"
+      }
+    },
+    {
+      "id": "sd-uss-midway",
+      "name": "USS Midway Museum",
+      "pricePerPerson": {
+        "cents": 3600,
+        "estimatedAsOf": "2025-01-15"
+      }
+    },
+    {
+      "id": "sd-la-jolla-kayak",
+      "name": "La Jolla Cove",
+      "pricePerPerson": {
+        "cents": 5500,
+        "estimatedAsOf": "2025-01-15"
+      }
+    },
+    {
+      "id": "sd-old-town",
+      "name": "Old Town San Diego",
+      "pricePerPerson": {
+        "cents": 0,
+        "estimatedAsOf": "2025-01-15"
+      }
+    },
+    {
+      "id": "sd-sunset-cliffs",
+      "name": "Sunset Cliffs",
+      "pricePerPerson": {
+        "cents": 0,
+        "estimatedAsOf": "2025-01-15"
+      }
+    }
+  ],
+  "travelTimes": [
+    {
+      "from": "Gaslamp Quarter",
+      "to": "North Park",
+      "minutes": 15
+    },
+    {
+      "from": "North Park",
+      "to": "Gaslamp Quarter",
+      "minutes": 15
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "Mission Beach",
+      "minutes": 20
+    },
+    {
+      "from": "Mission Beach",
+      "to": "Gaslamp Quarter",
+      "minutes": 20
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "Balboa Park",
+      "minutes": 10
+    },
+    {
+      "from": "Balboa Park",
+      "to": "Gaslamp Quarter",
+      "minutes": 10
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "San Diego Zoo",
+      "minutes": 12
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "Gaslamp Quarter",
+      "minutes": 12
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "USS Midway Museum",
+      "minutes": 8
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "Gaslamp Quarter",
+      "minutes": 8
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "Gaslamp Quarter",
+      "minutes": 25
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "Old Town San Diego",
+      "minutes": 12
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "Gaslamp Quarter",
+      "minutes": 12
+    },
+    {
+      "from": "Gaslamp Quarter",
+      "to": "Sunset Cliffs",
+      "minutes": 20
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "Gaslamp Quarter",
+      "minutes": 20
+    },
+    {
+      "from": "North Park",
+      "to": "Mission Beach",
+      "minutes": 20
+    },
+    {
+      "from": "Mission Beach",
+      "to": "North Park",
+      "minutes": 20
+    },
+    {
+      "from": "North Park",
+      "to": "Balboa Park",
+      "minutes": 8
+    },
+    {
+      "from": "Balboa Park",
+      "to": "North Park",
+      "minutes": 8
+    },
+    {
+      "from": "North Park",
+      "to": "San Diego Zoo",
+      "minutes": 8
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "North Park",
+      "minutes": 8
+    },
+    {
+      "from": "North Park",
+      "to": "USS Midway Museum",
+      "minutes": 15
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "North Park",
+      "minutes": 15
+    },
+    {
+      "from": "North Park",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "North Park",
+      "minutes": 25
+    },
+    {
+      "from": "North Park",
+      "to": "Old Town San Diego",
+      "minutes": 12
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "North Park",
+      "minutes": 12
+    },
+    {
+      "from": "North Park",
+      "to": "Sunset Cliffs",
+      "minutes": 22
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "North Park",
+      "minutes": 22
+    },
+    {
+      "from": "Mission Beach",
+      "to": "Balboa Park",
+      "minutes": 18
+    },
+    {
+      "from": "Balboa Park",
+      "to": "Mission Beach",
+      "minutes": 18
+    },
+    {
+      "from": "Mission Beach",
+      "to": "San Diego Zoo",
+      "minutes": 18
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "Mission Beach",
+      "minutes": 18
+    },
+    {
+      "from": "Mission Beach",
+      "to": "USS Midway Museum",
+      "minutes": 18
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "Mission Beach",
+      "minutes": 18
+    },
+    {
+      "from": "Mission Beach",
+      "to": "La Jolla Cove",
+      "minutes": 15
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "Mission Beach",
+      "minutes": 15
+    },
+    {
+      "from": "Mission Beach",
+      "to": "Old Town San Diego",
+      "minutes": 12
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "Mission Beach",
+      "minutes": 12
+    },
+    {
+      "from": "Mission Beach",
+      "to": "Sunset Cliffs",
+      "minutes": 12
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "Mission Beach",
+      "minutes": 12
+    },
+    {
+      "from": "Balboa Park",
+      "to": "San Diego Zoo",
+      "minutes": 5
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "Balboa Park",
+      "minutes": 5
+    },
+    {
+      "from": "Balboa Park",
+      "to": "USS Midway Museum",
+      "minutes": 12
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "Balboa Park",
+      "minutes": 12
+    },
+    {
+      "from": "Balboa Park",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "Balboa Park",
+      "minutes": 25
+    },
+    {
+      "from": "Balboa Park",
+      "to": "Old Town San Diego",
+      "minutes": 12
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "Balboa Park",
+      "minutes": 12
+    },
+    {
+      "from": "Balboa Park",
+      "to": "Sunset Cliffs",
+      "minutes": 20
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "Balboa Park",
+      "minutes": 20
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "USS Midway Museum",
+      "minutes": 14
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "San Diego Zoo",
+      "minutes": 14
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "San Diego Zoo",
+      "minutes": 25
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "Old Town San Diego",
+      "minutes": 12
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "San Diego Zoo",
+      "minutes": 12
+    },
+    {
+      "from": "San Diego Zoo",
+      "to": "Sunset Cliffs",
+      "minutes": 22
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "San Diego Zoo",
+      "minutes": 22
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "USS Midway Museum",
+      "minutes": 25
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "Old Town San Diego",
+      "minutes": 10
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "USS Midway Museum",
+      "minutes": 10
+    },
+    {
+      "from": "USS Midway Museum",
+      "to": "Sunset Cliffs",
+      "minutes": 18
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "USS Midway Museum",
+      "minutes": 18
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "Old Town San Diego",
+      "minutes": 20
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "La Jolla Cove",
+      "minutes": 20
+    },
+    {
+      "from": "La Jolla Cove",
+      "to": "Sunset Cliffs",
+      "minutes": 25
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "La Jolla Cove",
+      "minutes": 25
+    },
+    {
+      "from": "Old Town San Diego",
+      "to": "Sunset Cliffs",
+      "minutes": 18
+    },
+    {
+      "from": "Sunset Cliffs",
+      "to": "Old Town San Diego",
+      "minutes": 18
+    }
+  ]
+}

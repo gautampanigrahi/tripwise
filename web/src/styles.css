@@ -1,0 +1,384 @@
+/* TripWise: one plain stylesheet. Styles semantic elements plus a few classes. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1f2933;
+  --muted: #616e7c;
+  --border: #d9dee4;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --pass: #166534;
+  --pass-bg: #e8f6ec;
+  --fail: #b42318;
+  --fail-bg: #fdecea;
+  --warn-bg: #fff7e0;
+  --warn-border: #e8b931;
+  --radius: 8px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+/* Page layout */
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 3rem;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  margin: 1.25rem 0 0.5rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+small,
+.last-modified {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+article > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+
+article > header h2 {
+  margin: 0;
+}
+
+article > header p {
+  margin: 0;
+  color: var(--muted);
+  flex: 1;
+}
+
+/* Buttons */
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button[aria-pressed="true"] {
+  background: var(--accent-hover);
+  box-shadow: inset 0 0 0 2px #fff;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Tab bar (TripPage) */
+[role="tablist"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 1.5rem 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+[role="tab"] {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  margin-bottom: -1px;
+}
+
+[role="tab"]:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+[role="tab"][aria-selected="true"] {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+[role="tabpanel"] {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 0.5rem 1.25rem 1.25rem;
+}
+
+/* Forms */
+form {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  max-width: 36rem;
+}
+
+label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+form label {
+  display: flex;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  min-width: 0;
+}
+
+form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+form select,
+form textarea {
+  flex: 1 1 14rem;
+}
+
+[aria-invalid="true"] {
+  border-color: var(--fail) !important;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem 0.75rem;
+}
+
+.field-error {
+  display: block;
+  color: var(--fail);
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+}
+
+p[role="alert"] {
+  color: var(--fail);
+  background: var(--fail-bg);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+p[role="status"] {
+  color: var(--muted);
+}
+
+/* Lists of plan items */
+ul,
+ol {
+  padding-left: 1.25rem;
+}
+
+ul:has(> .card) {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+}
+
+.card > div:has(> button),
+.stale-conflict > div:has(> button) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Stale-write conflict alert */
+.stale-conflict {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.stale-conflict p {
+  margin-top: 0;
+}
+
+.stale-conflict dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15rem 1rem;
+}
+
+.stale-conflict dl > div {
+  display: contents;
+}
+
+.stale-conflict dt {
+  font-weight: 600;
+}
+
+.stale-conflict dd {
+  margin: 0;
+}
+
+/* Tables (check outcomes, alternative comparison) */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  background: var(--surface);
+  font-size: 0.95rem;
+}
+
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+thead th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+tr.pass,
+td.pass {
+  background: var(--pass-bg);
+}
+
+tr.fail,
+td.fail {
+  background: var(--fail-bg);
+}
+
+tr.pass > td:last-child,
+td.pass strong {
+  color: var(--pass);
+  font-weight: 600;
+}
+
+tr.fail > td:last-child,
+td.fail strong {
+  color: var(--fail);
+  font-weight: 600;
+}
+
+/* AlternativeView: current plan and alternative columns side by side */
+.side-by-side {
+  table-layout: fixed;
+}
+
+.side-by-side th:nth-child(1),
+.side-by-side th:nth-child(2) {
+  width: 8rem;
+}
+
+/* Narrow screens */
+@media (max-width: 640px) {
+  main {
+    padding: 0.75rem 0.75rem 2rem;
+  }
+
+  [role="tabpanel"] {
+    padding: 0.5rem 0.75rem 1rem;
+  }
+
+  [role="tablist"] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  [role="tab"] {
+    white-space: nowrap;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .side-by-side {
+    table-layout: auto;
+  }
+
+  .side-by-side th:nth-child(1),
+  .side-by-side th:nth-child(2) {
+    width: auto;
+  }
+
+  th,
+  td {
+    padding: 0.4rem 0.5rem;
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@tripwise/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "npx tsx seed.ts",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1177.0",
+    "@tripwise/shared": "*",
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,484 @@
+# Implementation Plan: TripWise Trip Planner
+
+## Overview
+
+The plan implements the design in TypeScript (npm workspaces, Node.js 20 Lambda, AWS CDK, React + Vite, vitest + fast-check). Work is ordered so the demo path works by the end of week 3: trip, invite, lodging, itinerary, one list (Groceries and Checklist), feasibility check, Bedrock explanation, SNS/EventBridge alerts, and reload.
+
+Suggested schedule for three people (A: backend API, B: web app, C: infrastructure and pure packages):
+
+- Week 1: Tasks 1–7. Scaffold, pure shared/engine/grounding packages, CDK base, web shell.
+- Week 2: Tasks 8–11 (A, C) in parallel with Task 12 (B). Guarded API, trips, invites, items, checks, explanation.
+- Week 3: Tasks 12–14. Demo screens, seed script, demo scenario test, first deploy.
+- Week 4: Tasks 15–16. Expenses and generic sections, optional Schedule/Preferences checks, alarms, optional drafting.
+
+## Tasks
+
+- [x] 1. Scaffold the monorepo and test runner
+  - Create root `package.json` with npm workspaces `packages/shared`, `packages/engine`, `packages/grounding`, `services/api`, `infra`, `web`, `scripts`
+  - Add `tsconfig.base.json` (strict mode), per-workspace `package.json`/`tsconfig.json`, and `vitest.workspace.ts` so `npx vitest --run` runs every workspace's tests
+  - Add dev dependencies: `vitest`, `fast-check`, `zod`, `typescript`, `aws-sdk-client-mock`
+  - _Requirements: 28.4_
+
+- [x] 2. Implement the shared domain package (`packages/shared`)
+  - [x] 2.1 Create core types and date utilities
+    - `src/types.ts`: `IsoDate`, `Trip`, `Membership`, `PlanItem`, `Section`, `CheckName`, `Unit`, `CheckOutcome`, `CheckResult`, `FieldError`, `ValidationResult`
+    - `src/dates.ts`: `IsoDateSchema`, `toEpochDay`, `range`, `tripNights` (UTC epoch days, `[start, end)`)
+    - _Requirements: 13.4, 14.5, 16.1_
+
+  - [x] 2.2 Implement trip input and Trip_Constraints validation
+    - `src/trip.ts`: `validateTripInput` (trimmed non-empty name/destination, end after start, error list names each invalid field)
+    - `src/constraints.ts`: strict zod `ConstraintsSchema` (dollar string → `budgetCents`), `totalBudgetLimitCents`
+    - _Requirements: 2.2, 2.3, 11.1, 11.2, 11.3, 11.4, 11.5_
+
+  - [ ]* 2.3 Write property test for trip input validation
+    - **Property 1: Trip input validation**
+    - **Validates: Requirements 2.2, 2.3**
+
+  - [x] 2.4 Implement Section parsing and per-Section validators
+    - `src/sections.ts`: `SECTIONS`, `parseSection`, strict zod schemas for Lodging, Itinerary, Groceries, Checklist, Expenses, and generic Sections; `validatePlanItem` collects all zod issues plus context rules (trip day range, member set) and maps them to `{ field, message }`
+    - Reject client-supplied `claimedBy`, `lastModifiedBy`, `userId`
+    - _Requirements: 4.4, 5.5, 5.6, 6.1, 6.2, 6.3, 7.1, 7.2, 7.3, 8.1, 8.3, 8.4, 9.1, 10.1, 10.2_
+
+  - [ ]* 2.5 Write property test for Section name validation
+    - **Property 10: Section name validation**
+    - **Validates: Requirements 5.5**
+
+  - [ ]* 2.6 Write property test for Section validators
+    - **Property 11: Section validators accept exactly valid items and name every invalid field**
+    - **Validates: Requirements 5.6, 6.2, 6.3, 7.2, 7.3, 8.3, 8.4, 10.2**
+
+  - [x] 2.7 Implement the Catalog schema and the San Diego Catalog file
+    - `src/catalog.ts`: `CatalogSchema`, `parseCatalog(raw, version)`, `formatEstimate(price)`
+    - `catalog/san-diego-v1.json`: at least 3 stays (including `sd-gaslamp-studio` sleeps 2 at $180/night and `sd-northpark-house` sleeps 6 at $450/night), at least 5 activities, a Travel_Time_Table, and an `estimatedAsOf` date on every price
+    - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 27.1_
+
+  - [ ]* 2.8 Write property test for estimate labels
+    - **Property 18: Estimated prices are labeled with their date**
+    - **Validates: Requirements 12.4**
+
+  - [ ]* 2.9 Write property test for invalid Catalog rejection
+    - **Property 19: Invalid catalogs are rejected with their version**
+    - **Validates: Requirements 12.5**
+
+  - [ ]* 2.10 Write smoke test for the shipped Catalog
+    - Assert `catalog/san-diego-v1.json` passes `CatalogSchema` with ≥ 3 stays, ≥ 5 activities, and `estimatedAsOf` on every price
+    - _Requirements: 12.1, 12.2, 12.3_
+
+  - [x] 2.11 Implement pure Plan_Item helpers
+    - `src/planItems.ts`: `stamp`, `applyUpdate`, `claim`, `confirmationKey` (sanitized, private trip prefix), `lodgingFromCatalogStay`, `groupItinerary`
+    - _Requirements: 5.1, 5.2, 6.4, 6.6, 7.4, 8.2, 9.2, 9.3, 9.4, 23.3_
+
+  - [ ]* 2.12 Write property test for write stamping
+    - **Property 8: Write stamping**
+    - **Validates: Requirements 5.1, 5.2, 8.2, 9.3**
+
+  - [ ]* 2.13 Write property test for optimistic concurrency
+    - **Property 33: Optimistic concurrency**
+    - **Validates: Requirements 23.3**
+
+  - [ ]* 2.14 Write property test for the Checklist claim transition
+    - **Property 15: Checklist claim transition**
+    - **Validates: Requirements 9.2, 9.4**
+
+  - [ ]* 2.15 Write property test for confirmation keys
+    - **Property 12: Confirmation keys stay under the trip's private prefix**
+    - **Validates: Requirements 6.4**
+
+  - [ ]* 2.16 Write property test for Catalog prefill
+    - **Property 13: Catalog prefill preserves stay data**
+    - **Validates: Requirements 6.6**
+
+  - [ ]* 2.17 Write property test for itinerary grouping
+    - **Property 14: Itinerary grouping is an ordered permutation**
+    - **Validates: Requirements 7.4**
+
+  - [x] 2.18 Implement message builders, reminder time, and log redaction
+    - `src/notify.ts`: `inviteMessage`, `checkResultMessage`, `reminderMessage`, `reminderAt(startDate)` (2 days before, 09:00 America/Los_Angeles), `reminderScheduleName(tripId)`
+    - `src/redact.ts`: deep-copy `redact` for door codes, confirmation numbers, check-in details, and tokens (any case, any depth)
+    - _Requirements: 3.2, 24.1, 24.2, 24.3, 25.6_
+
+  - [ ]* 2.19 Write property test for notification messages
+    - **Property 34: Notification messages carry required fields**
+    - **Validates: Requirements 3.2, 24.1, 24.3**
+
+  - [ ]* 2.20 Write property test for reminder time
+    - **Property 35: Reminder time is two days before start**
+    - **Validates: Requirements 24.2**
+
+  - [ ]* 2.21 Write property test for log redaction
+    - **Property 36: Log redaction**
+    - **Validates: Requirements 25.6**
+
+- [x] 3. Implement the Feasibility_Engine with the required checks (`packages/engine`)
+  - [x] 3.1 Implement Cost, Capacity, and Dates checks and the score
+    - `src/checks/cost.ts` (integer cents, `EngineInputError('UNKNOWN_ACTIVITY')`), `src/checks/capacity.ts`, `src/checks/dates.ts`
+    - `src/score.ts`: `feasibilityScore`, `scoreLabel`
+    - No clock, randomness, I/O, or AWS imports
+    - _Requirements: 11.4, 11.5, 13.4, 14.1, 14.2, 14.3, 14.4, 14.5, 15.1, 15.2, 15.3, 16.1, 16.2, 16.3, 19.1, 19.2, 19.3_
+
+  - [x] 3.2 Implement `runChecks`, current-stay selection, and alternative input
+    - `src/runChecks.ts`: `EngineInput`/`EngineOutput`, fixed outcome order, normalization of unordered inputs, `tripNights` in output, extension point for optional checks
+    - `src/lodging.ts`: `selectCurrentLodging`; `src/alternatives.ts`: `buildAlternativeInput`
+    - _Requirements: 13.1, 13.2, 13.4, 13.5, 20.1_
+
+  - [ ]* 3.3 Create shared fast-check arbitraries
+    - `test/arbitraries.ts`: `arbIsoDate`, `arbDateRange`, `arbCents`, `arbConstraints`, `arbCatalog`, `arbStay`, `arbItinerary`, `arbEngineInput`, covering the edge cases listed in the design's Testing Strategy
+    - _Requirements: 28.1_
+
+  - [ ]* 3.4 Write property test for the Cost check
+    - **Property 23: Cost check matches the reference formula**
+    - **Validates: Requirements 14.1, 14.3, 14.4, 14.5**
+
+  - [ ]* 3.5 Write property test for the total budget limit
+    - **Property 17: Total budget limit**
+    - **Validates: Requirements 11.4, 11.5, 14.2**
+
+  - [ ]* 3.6 Write property test for the Capacity check
+    - **Property 24: Capacity check**
+    - **Validates: Requirements 15.1, 15.2, 15.3**
+
+  - [ ]* 3.7 Write property test for the Dates check
+    - **Property 25: Dates check matches night enumeration**
+    - **Validates: Requirements 16.1, 16.2, 16.3**
+
+  - [ ]* 3.8 Write property test for score and label
+    - **Property 28: Score and label**
+    - **Validates: Requirements 19.1, 19.2, 19.3**
+
+  - [ ]* 3.9 Write property test for outcome set and shape
+    - **Property 20: Outcome set and shape**
+    - **Validates: Requirements 13.1, 13.4**
+
+  - [ ]* 3.10 Write property test for engine determinism
+    - **Property 21: Engine determinism**
+    - **Validates: Requirements 13.2**
+
+- [x] 4. Implement the grounding package (`packages/grounding`)
+  - [x] 4.1 Implement facts projection, prompt, grounding verifier, and template
+    - `src/facts.ts`: `toFacts`, `buildPrompt` (system prompt with "use only numbers in FACTS", cents shown as dollars)
+    - `src/verify.ts`: `extractNumbers`, `allowedNumbers`, `verifyGrounding`
+    - `src/template.ts`: `templateExplanation` (no stay or place names); `src/choose.ts`: `chooseExplanation`
+    - _Requirements: 21.1, 21.2, 21.3, 21.4_
+
+  - [ ]* 4.2 Write property test for prompt whitelisting
+    - **Property 30: Prompt contains only whitelisted facts**
+    - **Validates: Requirements 21.1**
+
+  - [ ]* 4.3 Write property test for grounding verifier soundness
+    - **Property 31: Grounding verifier soundness**
+    - **Validates: Requirements 21.3**
+
+  - [ ]* 4.4 Write property test for stored explanations
+    - **Property 32: Stored explanations are always grounded**
+    - **Validates: Requirements 21.4, 21.5, 27.4**
+
+  - [ ]* 4.5 Write unit tests for grounding examples
+    - `"$2,850.00"`, `"2850"`, `"75%"`, a template explanation, and `"$350 over"` (rejected)
+    - _Requirements: 28.3_
+
+- [x] 5. Build the AWS CDK infrastructure base (`infra`)
+  - [x] 5.1 Define data, auth, and web hosting constructs
+    - `lib/constructs/data.ts`: DynamoDB table (on-demand, AWS-managed encryption, PITR, GSI1), `DataBucket` (block all public access, S3-managed encryption, enforceSSL, versioning), SNS topic with SSE
+    - `lib/constructs/auth.ts`: Cognito user pool (verified email) and PKCE client with Hosted UI domain
+    - `lib/constructs/web.ts`: `WebBucket`, CloudFront distribution with OAC, `BucketDeployment` for `web/dist` and `catalog/`
+    - _Requirements: 1.1, 12.1, 25.2, 25.4, 25.5_
+
+  - [x] 5.2 Define the API construct and stack
+    - `lib/constructs/api.ts`: HTTP API with `HttpUserPoolAuthorizer` default, CORS limited to the CloudFront domain, seven `NodejsFunction`s (`trips`, `invites`, `items`, `catalog`, `checks`, `explain`, `reminder`) pointing at `services/api/src/handlers/*.ts`, one explicit IAM role per function with the design's action/ARN table, scheduler role, env vars (`TABLE_NAME`, `CATALOG_VERSION`, `ENABLED_CHECKS`, `MODEL_ID`, `TOPIC_ARN`), explain-fn 10 s timeout
+    - `lib/tripwise-stack.ts` and `bin/app.ts` with a single region from CDK context
+    - _Requirements: 1.3, 25.1, 25.2, 25.3_
+
+- [x] 6. Build the web app shell (`web`)
+  - [x] 6.1 Scaffold Vite + React with authentication and the API client
+    - `src/main.tsx`, `src/auth/amplify.ts` (Hosted UI, PKCE, tokens in memory), `src/auth/RequireAuth.tsx`, `src/api/client.ts` (always sends `Authorization: Bearer <idToken>`)
+    - _Requirements: 1.1, 1.2_
+
+  - [ ]* 6.2 Write React Testing Library tests for the auth gate and API client
+    - RequireAuth shows sign-in until a session exists; apiClient sets the bearer header
+    - _Requirements: 1.1, 1.2_
+
+- [x] 7. Checkpoint - Core packages pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 8. Build the API foundation (`services/api`)
+  - [x] 8.1 Implement caller identity, HTTP helpers, and request logging
+    - `src/lib/caller.ts`: `getCaller` (claims only), `src/lib/http.ts`: `json`, error mapping table, `parseTripId`
+    - `src/lib/logging.ts`: `withRequestLogging` (one JSON line with requestId, route, status, durationMs, all payloads through `redact`), Powertools Metrics in namespace `TripWise`
+    - _Requirements: 4.4, 25.6, 26.1_
+
+  - [x] 8.2 Implement repositories with DynamoDB adapters and in-memory fakes
+    - `src/repos/interfaces.ts`: trips, memberships, invitations, constraints, planItems, checkResults
+    - `src/repos/dynamo/*.ts`: single-table keys, `ConsistentRead: true`, paginated section queries, `TransactWriteItems` for trip creation and invite acceptance, conditional updates for `lastModifiedAt` and `claimedBy`, history with `ScanIndexForward: false`
+    - `src/repos/memory/*.ts`: fakes implementing the same interfaces and recording calls
+    - _Requirements: 2.1, 2.4, 3.3, 5.4, 9.4, 13.6, 23.2, 23.3_
+
+  - [x] 8.3 Implement the Membership_Guard
+    - `src/lib/guard.ts`: pure `decide(membership, action)` and `withTripGuard(action, handler)` doing only the Membership lookup before the guard decision
+    - _Requirements: 3.4, 4.1, 4.2, 4.3_
+
+  - [ ]* 8.4 Write property test for the access decision
+    - **Property 5: Access decision**
+    - **Validates: Requirements 3.4, 4.2, 4.3**
+
+- [x] 9. Implement trips, invitations, notifications, and the reminder
+  - [x] 9.1 Implement SNS and Scheduler adapters
+    - `src/adapters/notify.ts`: `safePublish` (per-recipient `recipient` attribute, logs `SNS_PUBLISH_FAILED`, never throws), `subscribeRecipient`
+    - `src/adapters/scheduler.ts`: `upsertReminder` (CreateSchedule, UpdateSchedule on `ConflictException`, skip past times, `ActionAfterCompletion: DELETE`, logs `SCHEDULE_FAILED`)
+    - _Requirements: 3.2, 24.2, 24.4_
+
+  - [x] 9.2 Implement the trips handler
+    - `src/handlers/trips.ts`: `POST /trips`, `GET /trips`, `GET /trips/{tripId}`, `PUT`/`GET /trips/{tripId}/constraints`; create or update the reminder on trip creation and start-date change; export its route list
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 11.1, 11.2, 11.3, 23.1, 24.2_
+
+  - [ ]* 9.3 Write property test for trip creation
+    - **Property 2: Created trip has its creator as Host and Member**
+    - **Validates: Requirements 2.1**
+
+  - [ ]* 9.4 Write property test for the trip list
+    - **Property 3: Trip list is exactly the caller's memberships**
+    - **Validates: Requirements 2.4**
+
+  - [ ]* 9.5 Write property test for constraints validation and round trip
+    - **Property 16: Constraints validation and round trip**
+    - **Validates: Requirements 11.1, 11.2, 11.3**
+
+  - [x] 9.6 Implement the invitations handler
+    - `src/handlers/invites.ts`: `POST /trips/{tripId}/invitations` (guard action `invite`, store pending lowercase email, subscribe and publish invite alert with accept link), `POST /invitations/{inviteId}/accept` (verified matching email, else 403 with no writes); export its route list
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+  - [ ]* 9.7 Write property test for invitation acceptance
+    - **Property 4: Invitation acceptance requires a matching verified email**
+    - **Validates: Requirements 3.3, 3.5**
+
+  - [x] 9.8 Implement the reminder handler
+    - `src/handlers/reminder.ts`: load Trip and Members and publish `reminderMessage` to every Member
+    - _Requirements: 24.3_
+
+  - [ ]* 9.9 Write unit tests for notification failure handling and the reminder
+    - SNS publish failure still returns 201 for trip creation and invitation; reminder publishes once per Member
+    - _Requirements: 24.3, 24.4_
+
+- [x] 10. Implement the Plan_Item API
+  - [x] 10.1 Implement Plan_Item CRUD, claim, and concurrency
+    - `src/handlers/items.ts`: list, create, update (requires `expectedLastModifiedAt`, 409 `STALE` with stored item), delete, and Checklist claim (409 `ALREADY_CLAIMED`); stamping from the token caller; validation context built from Trip dates and member set; export its route list
+    - _Requirements: 4.3, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 8.2, 9.2, 9.3, 9.4, 23.2, 23.3_
+
+  - [x] 10.2 Implement confirmation file upload and download
+    - `src/adapters/s3.ts` plus routes in `src/handlers/items.ts`: presigned POST (5 min, pinned content type, 10 MB max) under `confirmationKey`, record the key on the Lodging item; presigned GET with `expiresIn: 900`
+    - _Requirements: 6.4, 6.5_
+
+  - [ ]* 10.3 Write property test for the Plan_Item store round trip
+    - **Property 9: Plan item store round trip**
+    - **Validates: Requirements 5.3, 5.4**
+
+  - [ ]* 10.4 Write property test for caller identity
+    - **Property 7: Caller identity comes only from the token**
+    - **Validates: Requirements 4.4**
+
+  - [ ]* 10.5 Write unit tests for presigned URLs and conditional-write mapping
+    - Download URL `expiresIn ≤ 900`; key under the trip's private prefix; DynamoDB `ConditionalCheckFailedException` maps to 409
+    - _Requirements: 6.5, 9.4, 23.3_
+
+- [x] 11. Implement the catalog, explanation, and checks API, then wire routes
+  - [x] 11.1 Implement Catalog loading and the catalog handler
+    - `src/adapters/catalog.ts`: S3 `GetObject` for `CATALOG_VERSION`, `parseCatalog`, warm-cache by version, log `CATALOG_INVALID`
+    - `src/handlers/catalog.ts`: `GET /catalog`, 500 `{ error: 'CATALOG_INVALID', version }` on schema failure
+    - _Requirements: 12.1, 12.5_
+
+  - [x] 11.2 Implement the explanation handler
+    - `src/handlers/explain.ts`: read Check_Result, `toFacts`/`buildPrompt`, Bedrock `ConverseCommand` (temperature 0, maxTokens 300, 10 s abort), `chooseExplanation`, store `explanation` and `explanationSource`, log `EXPLANATION_FALLBACK` and emit `TemplateFallbackCount`
+    - _Requirements: 21.1, 21.2, 21.3, 21.4, 21.5, 21.6, 26.3_
+
+  - [x] 11.3 Implement the checks handler
+    - `src/handlers/checks.ts`: `POST /trips/{tripId}/checks` (load lodging, transport, itinerary, constraints, Catalog; 422 `MISSING_INPUT`/`UNKNOWN_ACTIVITY`; `runChecks` with `ENABLED_CHECKS`; save Check_Result; invoke explain-fn with template fallback on failure; SNS check-result alert per Member; `CheckRunDurationMs` and `FailedCheckCount` metrics)
+    - `GET /trips/{tripId}/checks` newest first; `POST /trips/{tripId}/checks/alternatives` (422 `NO_BASE_RESULT`, saves `kind: 'alternative'` with `evaluatedStay.stayId`, no Plan_Item writes); export its route list
+    - _Requirements: 13.1, 13.2, 13.3, 13.5, 13.6, 20.1, 20.2, 21.6, 24.1, 26.2_
+
+  - [ ]* 11.4 Write property test for alternatives
+    - **Property 29: Alternatives reuse checks and leave the plan unchanged**
+    - **Validates: Requirements 20.1, 20.2**
+
+  - [ ]* 11.5 Write property test for check history order
+    - **Property 22: History is newest first**
+    - **Validates: Requirements 13.6**
+
+  - [ ]* 11.6 Write unit tests for the explanation handler
+    - Mock Bedrock with `aws-sdk-client-mock` for success, error, and timeout (fake timers); assert the "use only numbers" instruction, stored source, and fallback metric
+    - _Requirements: 21.2, 21.5, 21.6, 26.3_
+
+  - [ ]* 11.7 Write unit tests for the checks handler
+    - 422 for missing lodging, missing constraints, unknown activity, and no base result; check-result alert per Member; run metrics emitted; Check_Result saved with timestamp, stay, Catalog version, outcomes, score
+    - _Requirements: 13.3, 13.5, 24.1, 26.2_
+
+  - [x] 11.8 Aggregate the route table and wire the guard
+    - `src/routes.ts`: combine the route lists from every handler; register each `/trips/{tripId}/*` route through `withTripGuard` with the design's guard action; wrap every Lambda export with `withRequestLogging`
+    - _Requirements: 4.1, 4.2, 26.1_
+
+  - [ ]* 11.9 Write property test for no data access before the guard
+    - **Property 6: No trip data access before a successful guard**
+    - **Validates: Requirements 4.1, 4.2**
+
+  - [ ]* 11.10 Write unit test for the guard over the route table
+    - Iterate every `/trips/{tripId}/*` route with a non-member fake and assert 403 with no trip data
+    - _Requirements: 28.2_
+
+  - [ ]* 11.11 Write CDK assertion tests
+    - `infra/test/stack.test.ts`: single region, resource inventory, distinct role per function, no wildcard resources except where AWS requires, blocked public access, encryption, OAC origin, authorizer on every route
+    - _Requirements: 1.3, 25.1, 25.2, 25.3, 25.4, 25.5_
+
+- [x] 12. Build the demo-path web screens (`web`)
+  - [x] 12.1 Implement trip list, trip creation, invitations, and trip page loading
+    - `src/api/trips.ts`, `src/pages/TripsPage.tsx`, `src/pages/AcceptInvite.tsx`, `src/pages/TripPage.tsx` (fetch Plan_Items, constraints, and latest Check_Result on every load or reload)
+    - _Requirements: 2.4, 3.1, 3.3, 23.1_
+
+  - [x] 12.2 Implement the Lodging section
+    - `src/sections/Lodging.tsx` with Catalog stay picker (prefill via `lodgingFromCatalogStay`, `formatEstimate` labels), confirmation upload and download
+    - `src/components/LastModified.tsx` and `src/components/StaleConflict.tsx` (shows the stored item on 409)
+    - _Requirements: 5.7, 6.1, 6.4, 6.5, 6.6, 12.4, 23.3_
+
+  - [x] 12.3 Implement the Itinerary, Groceries, and Checklist sections
+    - `src/sections/Itinerary.tsx` (grouped via `groupItinerary`), `src/sections/Groceries.tsx` (purchased toggle), `src/sections/Checklist.tsx` (claim and done)
+    - _Requirements: 7.1, 7.4, 8.1, 8.2, 9.1, 9.2, 9.3_
+
+  - [x] 12.4 Implement the constraints form and checks panel
+    - `src/sections/Constraints.tsx`; `src/checks/ChecksPanel.tsx` (run check, outcome table with name/measured/limit/unit/status, label, failed list, explanation and source, history); `src/checks/AlternativeView.tsx` (side by side with latest non-alternative result)
+    - _Requirements: 11.1, 13.6, 19.2, 19.3, 19.4, 20.3, 21.6_
+
+  - [x] 12.5 Wire sections and checks into the trip page
+    - Update `src/pages/TripPage.tsx` with tabs for Lodging, Itinerary, Groceries, Checklist, Constraints, and Checks
+    - _Requirements: 4.3, 23.1_
+
+  - [ ]* 12.6 Write React Testing Library tests for trip page and section forms
+    - Fetch on load; lastModified display; Lodging, Itinerary, Groceries, and Checklist form fields
+    - _Requirements: 5.7, 6.1, 7.1, 8.1, 9.1, 23.1_
+
+  - [ ]* 12.7 Write React Testing Library tests for the checks panel
+    - Outcome table, "Feasible"/"Not feasible" label with failed list, alternative side-by-side view
+    - _Requirements: 19.3, 19.4, 20.3_
+
+- [x] 13. Implement the demo seed and scenario test
+  - [x] 13.1 Write the seed script
+    - `scripts/seed.ts`: 4 Cognito test users, Trip 2025-06-12 to 2025-06-16, constraints (4 travelers, $2,500 total), selected Lodging `sd-gaslamp-studio`, sample itinerary and groceries
+    - _Requirements: 27.1_
+
+  - [ ]* 13.2 Write the demo scenario integration test
+    - Engine on seed input: Capacity fails with measured 2, limit 4; switching to `sd-northpark-house` passes every check; `chooseExplanation` output passes `verifyGrounding`
+    - _Requirements: 27.2, 27.3, 27.4_
+
+- [x] 14. Checkpoint - Demo path works end to end
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 15. Complete remaining sections and extensions
+  - [x] 15.1 Implement Expenses and generic Section screens
+    - `src/sections/Expenses.tsx` (payer, amount, purpose, no payment actions), `src/sections/GenericSection.tsx` for Transportation, Reservations, and ScratchPad; add tabs in `src/pages/TripPage.tsx`
+    - _Requirements: 5.8, 10.1, 10.3_
+
+  - [ ]* 15.2 Write React Testing Library tests for Expenses and generic sections
+    - Create/view/edit/delete for generic Sections; no payment, transfer, or settlement controls in Expenses
+    - _Requirements: 5.8, 10.3_
+
+  - [x] 15.3 Implement the Schedule check (optional extension)
+    - `packages/engine/src/checks/schedule.ts` and registration in `src/runChecks.ts` behind `ENABLED_CHECKS`
+    - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5_
+
+  - [x] 15.4 Implement the Preferences check (optional extension)
+    - `packages/engine/src/checks/preferences.ts` and registration in `src/runChecks.ts`
+    - _Requirements: 18.1, 18.2, 18.3_
+
+  - [ ]* 15.5 Write property test for the Schedule check
+    - **Property 26: Schedule check matches a reference model**
+    - **Validates: Requirements 17.1, 17.2, 17.3, 17.4, 17.5**
+
+  - [ ]* 15.6 Write property test for the Preferences check
+    - **Property 27: Preferences check**
+    - **Validates: Requirements 18.1, 18.2, 18.3**
+
+  - [ ] 15.7 Add CloudWatch alarms
+    - `infra/lib/constructs/observability.ts` (Lambda `Errors > 0` per function, API 5xx rate, `TemplateFallbackCount > 3` per hour) wired in `lib/tripwise-stack.ts`
+    - _Requirements: 25.2, 26.2, 26.3_
+
+  - [ ] 15.8 Implement Bedrock drafting and trip summary (optional extension)
+    - `services/api/src/handlers/drafting.ts` behind `ENABLE_DRAFTING` (scratch-pad draft returned unsaved; trip summary from redacted Plan_Items and latest Check_Result, 422 `SUMMARY_UNGROUNDED`); add routes in `src/routes.ts` and `infra/lib/constructs/api.ts`; add a Draft button in `web/src/sections/GenericSection.tsx`
+    - _Requirements: 22.1, 22.2, 22.3_
+
+- [x] 16. Final checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 17. Replace the CDK stack with Terraform
+  - [x] 17.1 Write the Lambda build script
+    - `scripts/build-lambdas.ts` (or `.mjs`): bundle the 7 handlers in `services/api/src/handlers/*.ts` (`trips`, `invites`, `items`, `catalog`, `checks`, `explain`, `reminder`) with esbuild (platform node, target `node20`, arm64-compatible, AWS SDK bundled) and zip each into `dist/lambda/<name>.zip`
+    - Add npm script `build:lambdas` to the root `package.json`; ignore `dist/` in `.gitignore`
+    - _Requirements: 25.2, 25.3_
+
+  - [x] 17.2 Define Terraform data, auth, and web hosting resources
+    - `terraform/` root module with AWS provider and a single `region` variable (default `us-west-2`)
+    - DynamoDB table with `GSI1` (on-demand, PITR, SSE); `DataBucket` (all public access blocked, SSE-S3, TLS-only bucket policy, versioning); SNS topic with SSE (`alias/aws/sns`)
+    - `WebBucket` and CloudFront distribution with OAC (bucket policy limited to the distribution) and SPA error responses (403/404 → `/index.html`)
+    - Cognito user pool (verified email), PKCE user pool client, and Hosted UI domain
+    - _Requirements: 1.1, 1.3, 12.1, 25.1, 25.2, 25.4, 25.5_
+
+  - [x] 17.3 Define the Terraform API and functions
+    - HTTP API with Cognito JWT authorizer on every route, CORS limited to the CloudFront domain, and routes matching `services/api/src/routes.ts`
+    - 7 Lambda functions from `dist/lambda/*.zip` (Node.js 20, arm64, `source_code_hash`), each with its own IAM role per the design's action/ARN table and its own log group; env vars `TABLE_NAME`, `CATALOG_VERSION`, `ENABLED_CHECKS`, `MODEL_ID`, `TOPIC_ARN`; explain-fn 10 s timeout, checks-fn 20 s
+    - Scheduler role (`lambda:InvokeFunction` on reminder-fn only); `aws_lambda_permission` for API Gateway and for the scheduler
+    - Outputs: `AppUrl`, `ApiUrl`, `UserPoolId`, `UserPoolClientId`, `CognitoDomain`, `DataBucketName`, `TableName`, `ReminderFunctionArn`, `SchedulerRoleArn`
+    - _Requirements: 1.3, 4.1, 24.2, 25.1, 25.2, 25.3, 26.1_
+
+  - [x] 17.4 Write the deploy script and remove the CDK app
+    - `scripts/deploy.sh`: run `build:lambdas`, `terraform apply`, write `web/.env.local` from Terraform outputs, build the web app, `aws s3 sync` `web/dist` to `WebBucket` and `catalog/` to `DataBucket` under `catalog/`, then create a CloudFront invalidation
+    - Delete `infra/` (including its CDK tests) and remove its entry from the root `package.json` workspaces and `vitest.workspace.ts`
+    - Update `services/api/src/routes.test.ts` so the route check compares `routes.ts` against the routes declared in `terraform/` instead of `infra/lib/constructs/api.ts`
+    - _Requirements: 1.3, 12.1, 25.2, 26.1, 28.2_
+
+  - [x] 17.5 Checkpoint - Terraform validates and all tests pass
+    - Run `terraform fmt -check`, `terraform init -backend=false`, and `terraform validate` in `terraform/`; run all vitest tests and typechecks
+    - Run `terraform plan` only if AWS credentials exist; never run `terraform apply`
+    - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 18. Add a basic stylesheet for the web app
+  - `web/src/styles.css` imported once in `web/src/main.tsx`: plain CSS, no new dependencies; page layout and header, tab bar for TripPage, forms and inline field errors, buttons, tables (checks outcome table with pass/fail colors), the `stale-conflict` alert and `last-modified` text, AlternativeView side-by-side layout, responsive for narrow screens
+  - Add `className`s to existing components only where needed for the styles; no behavior changes
+  - _Requirements: 5.7, 19.2, 19.3, 19.4, 20.3, 23.3_
+
+## Notes
+
+- Tasks marked with `*` are optional and can be skipped for a faster MVP.
+- Each task references specific requirements for traceability. Requirements 23.2 and 27.5 (second Member sees changes after reload) are covered by `ConsistentRead` reads (8.2) and load-time fetches (12.1); confirm them manually after deployment.
+- Property tests use fast-check with at least 100 runs and a tag comment: `// Feature: tripwise-trip-planner, Property N: <title>`.
+- Property 16, 22, 29, 2, 3, 6, 7, and 9 run handlers against the in-memory repository fakes from task 8.2.
+- Tasks 15.3, 15.4, and 15.8 implement optional extensions and can be dropped if week 4 runs short.
+- Task 17 replaces the CDK app in `infra/` (tasks 5.1, 5.2, 11.11) with Terraform in `terraform/`. `cdk bootstrap` is no longer needed. Deploy with `scripts/deploy.sh`, which needs the AWS CLI, Terraform, and credentials for the target account. References to `infra/` in tasks 15.7 and 15.8 now mean the equivalent files in `terraform/`.
+- Task 17 does not depend on tasks 15.x or 16. In the dependency graph its waves (15–18) run right after checkpoint 14 and before the remaining 15.x tasks and checkpoint 16.
+- Task 18 is listed after task 17 but runs in wave 20, after task 15.1 (both touch `web/src/pages/TripPage.tsx` and section components) and before checkpoint 16. Task 15.8 also edits `web/src/sections/GenericSection.tsx`, so it stays in wave 21, after task 18.
+
+## Task Dependency Graph
+
+```json
+{
+  "waves": [
+    { "id": 0, "tasks": ["1"] },
+    { "id": 1, "tasks": ["2.1", "5.1", "6.1"] },
+    { "id": 2, "tasks": ["2.2", "2.4", "2.7", "2.18", "5.2", "6.2"] },
+    { "id": 3, "tasks": ["2.3", "2.5", "2.6", "2.8", "2.9", "2.10", "2.11", "2.19", "2.20", "2.21", "3.1", "4.1"] },
+    { "id": 4, "tasks": ["2.12", "2.13", "2.14", "2.15", "2.16", "2.17", "3.2", "4.2", "4.3", "4.4", "4.5"] },
+    { "id": 5, "tasks": ["3.3"] },
+    { "id": 6, "tasks": ["3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10"] },
+    { "id": 7, "tasks": ["7"] },
+    { "id": 8, "tasks": ["8.1", "8.2", "12.1", "12.2"] },
+    { "id": 9, "tasks": ["8.3", "9.1", "11.1", "11.2", "12.3", "12.4"] },
+    { "id": 10, "tasks": ["8.4", "9.2", "9.6", "9.8", "10.1", "11.6", "12.5"] },
+    { "id": 11, "tasks": ["9.3", "9.4", "9.5", "9.7", "9.9", "10.2", "11.3", "12.6", "12.7"] },
+    { "id": 12, "tasks": ["10.3", "10.4", "10.5", "11.4", "11.5", "11.7", "11.8", "13.1"] },
+    { "id": 13, "tasks": ["11.9", "11.10", "11.11", "13.2"] },
+    { "id": 14, "tasks": ["14"] },
+    { "id": 15, "tasks": ["17.1", "17.2"] },
+    { "id": 16, "tasks": ["17.3"] },
+    { "id": 17, "tasks": ["17.4"] },
+    { "id": 18, "tasks": ["17.5"] },
+    { "id": 19, "tasks": ["15.1", "15.3", "15.7"] },
+    { "id": 20, "tasks": ["15.2", "15.4", "15.5", "18"] },
+    { "id": 21, "tasks": ["15.6", "15.8"] },
+    { "id": 22, "tasks": ["16"] }
+  ]
+}
+```
