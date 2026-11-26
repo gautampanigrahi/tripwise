@@ -588,6 +588,12 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     - Never run `terraform apply` and never migrate state
     - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 23. Fix the CI test failure on GitHub runners
+  - `services/api/src/handlers/drafts.test.ts`: the log-capture helper (`failedLines`, around line 99–100) parses every captured stderr line as JSON; on GitHub's Node 20 runner the AWS SDK prints a non-JSON `(node:NNNN) Warning: NodeVersionSupportWarning` line, which breaks the "gives up after 8 seconds with TIMEOUT" test. Make the helper skip lines that are not JSON objects (and check other tests for the same pattern)
+  - `.github/workflows/ci.yml` and `.github/workflows/deploy.yml`: use Node 22 in `actions/setup-node` (keep the Lambda runtime unchanged)
+  - Verify locally: `npm run typecheck`, `npx vitest --run`, and the same test with a simulated non-JSON stderr line
+  - _Requirements: 28.4_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
@@ -643,7 +649,8 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 32, "tasks": ["22.1", "22.2"] },
     { "id": 33, "tasks": ["22.3", "22.4"] },
     { "id": 34, "tasks": ["22.5"] },
-    { "id": 35, "tasks": ["22.6"] }
+    { "id": 35, "tasks": ["22.6"] },
+    { "id": 36, "tasks": ["23"] }
   ]
 }
 ```

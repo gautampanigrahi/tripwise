@@ -19,14 +19,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const parsed = () => lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+/** Parses captured lines that are JSON objects; skips others such as Node `(node:NNNN) Warning: ...` lines. */
+const parsed = () =>
+  lines.flatMap((l) => {
+    if (!l.trimStart().startsWith('{')) return [];
+    try {
+      return [JSON.parse(l) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
 const requestLines = () => parsed().filter((l) => l.message === 'request');
 
 describe('withRequestLogging', () => {
   it('writes one JSON line with requestId, route, status, and durationMs (Req 26.1)', async () => {
     const res = await withRequestLogging(async () => json(201, { ok: true }))(event, context);
     expect(res.statusCode).toBe(201);
-    expect(lines).toHaveLength(1);
+    expect(parsed()).toHaveLength(1);
     const [line] = requestLines();
     expect(line).toMatchObject({ level: 'INFO', requestId: 'req-1', route: 'GET /trips/{tripId}', status: 201 });
     expect(typeof line?.durationMs).toBe('number');
@@ -44,7 +53,7 @@ describe('withRequestLogging', () => {
     })(event, context);
     expect(res.statusCode).toBe(403);
     expect(JSON.parse(res.body)).toEqual({ error: 'FORBIDDEN' });
-    expect(lines).toHaveLength(1);
+    expect(parsed()).toHaveLength(1);
     expect(requestLines()[0]).toMatchObject({ level: 'INFO', status: 403 });
   });
 
@@ -55,10 +64,10 @@ describe('withRequestLogging', () => {
     })(event, context);
     expect(res.statusCode).toBe(500);
     expect(JSON.parse(res.body)).toEqual({ error: 'INTERNAL', requestId: 'req-1' });
-    expect(lines).toHaveLength(1);
+    expect(parsed()).toHaveLength(1);
     const [line] = requestLines();
     expect(line).toMatchObject({ level: 'ERROR', status: 500, error: { message: 'boom', doorCode: '[REDACTED]' } });
-    expect(lines[0]).not.toContain('4321');
+    expect(lines.join('\n')).not.toContain('4321');
   });
 
   it('publishes stored metrics in the TripWise namespace after the request', async () => {

@@ -96,8 +96,17 @@ async function setup() {
 }
 
 const prompt = () => br.commandCalls(ConverseCommand)[0]!.args[0].input;
-const failedLines = () =>
-  lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.event === 'DRAFT_FAILED');
+/** Parses captured lines that are JSON objects; skips others such as Node `(node:NNNN) Warning: ...` lines. */
+const jsonLines = () =>
+  lines.flatMap((l) => {
+    if (!l.trimStart().startsWith('{')) return [];
+    try {
+      return [JSON.parse(l) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
+const failedLines = () => jsonLines().filter((l) => l.event === 'DRAFT_FAILED');
 
 describe('drafts handler', () => {
   it('drafts from notes and selected items without storing anything', async () => {
@@ -221,6 +230,17 @@ describe('drafts handler', () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await expectFailure(await pending, 'TIMEOUT', writes);
+  });
+
+  it('still finds the DRAFT_FAILED line when Node prints a non-JSON warning to stderr', async () => {
+    const { call, writes } = await setup();
+    br.on(ConverseCommand).callsFake(() => {
+      process.stderr.write('(node:1) Warning: NodeVersionSupportWarning: The AWS SDK for JavaScript (v3) ...\n');
+      process.stderr.write('{not json\n');
+      throw new Error('throttled');
+    });
+    await expectFailure(await call({ notes: NOTES }), 'BEDROCK_ERROR', writes);
+    expect(lines).toContain('(node:1) Warning: NodeVersionSupportWarning: The AWS SDK for JavaScript (v3) ...');
   });
 
   it('proposes a move and a removal for named itinerary stops and stores nothing', async () => {
