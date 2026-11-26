@@ -29,9 +29,9 @@ locals {
       timeout = 10
       env     = merge(local.base_env, { TOPIC_ARN = aws_sns_topic.notifications.arn, APP_URL = local.app_url })
     }
-    # items-fn may ask the model for a map search, then store the coordinates it finds.
+    # items-fn looks up map pins and fills a listing. Grounding needs most of the 30 s API limit.
     items = {
-      timeout = 20
+      timeout = 29
       env     = merge(local.base_env, { DATA_BUCKET = aws_s3_bucket.data.bucket, MODEL_ID = var.model_id })
     }
     catalog = {
@@ -85,6 +85,7 @@ locals {
     "POST /trips/{tripId}/sections/Checklist/items/{itemId}/claim" = "items"
     "POST /trips/{tripId}/items/{itemId}/confirmation-upload"      = "items"
     "GET /trips/{tripId}/items/{itemId}/confirmation"              = "items"
+    "POST /trips/{tripId}/lodging/from-link"                       = "items"
     "GET /catalog"                                                 = "catalog"
     "POST /trips/{tripId}/checks"                                  = "checks"
     "POST /trips/{tripId}/checks/alternatives"                     = "checks"

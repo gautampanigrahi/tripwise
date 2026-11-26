@@ -90,6 +90,22 @@ export async function deleteItem(client: ApiClient, tripId: string, section: Sec
   await client.delete<unknown>(itemPath(tripId, section, itemId));
 }
 
+/** Facts read from a public listing. Missing fields were not on the page. */
+export interface ListingFacts {
+  name?: string;
+  address?: string;
+  sleeps?: number;
+  nightlyPrice?: string;
+  /** https pages cited by the web search. */
+  sources?: string[];
+}
+
+/** Reads a listing link into lodging fields. Nothing is saved until the form is submitted. */
+export async function readListingLink(client: ApiClient, tripId: string, listingUrl: string): Promise<ListingFacts> {
+  const body = await client.post<ListingFacts>(`/trips/${enc(tripId)}/lodging/from-link`, { listingUrl });
+  return body ?? {};
+}
+
 /** Claims a Checklist item for the caller. 409 ALREADY_CLAIMED surfaces as an ApiError. */
 export async function claimItem<F = Record<string, unknown>>(
   client: ApiClient,

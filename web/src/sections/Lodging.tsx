@@ -21,6 +21,7 @@ import {
   getConfirmationDownloadUrl,
   updateItem,
   uploadConfirmation,
+  readListingLink,
 } from "../api/items";
 import { LastModified } from "../components/LastModified";
 import { StaleConflict } from "../components/StaleConflict";
@@ -149,11 +150,12 @@ function fieldsFromForm(form: LodgingForm): Record<string, unknown> {
 /** Maps API errors to readable text; 400 VALIDATION bodies become field errors. */
 function describeError(err: unknown): { message: string; fields: FieldError[] } {
   if (err instanceof ApiError) {
-    const body = err.body as { error?: string; fields?: FieldError[] } | undefined;
+    const body = err.body as { error?: string; message?: string; fields?: FieldError[] } | undefined;
     if (err.status === 400 && body?.error === "VALIDATION" && Array.isArray(body.fields)) {
       return { message: "Please fix the highlighted fields.", fields: body.fields };
     }
     if (err.status === 403) return { message: "You are not a Member of this trip.", fields: [] };
+    if (body?.message) return { message: body.message, fields: [] };
     return { message: `Request failed (${err.status}${body?.error ? ` ${body.error}` : ""}).`, fields: [] };
   }
   return { message: err instanceof Error ? err.message : "Something went wrong.", fields: [] };
@@ -195,6 +197,14 @@ function catalogFeatures(stay: CatalogStay): string[] {
 
 type Editing = { mode: "create" } | { mode: "edit"; itemId: string; expectedLastModifiedAt: string };
 
+function sourceLabel(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 export function Lodging({ tripId, items, members, onChanged, catalog: catalogProp }: LodgingProps) {
   const client = useApiClient();
   const toast = useToast();
@@ -208,6 +218,9 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [filling, setFilling] = useState(false);
+  const [fromListing, setFromListing] = useState(false);
+  const [sources, setSources] = useState<string[]>([]);
   const [stale, setStale] = useState<LodgingItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<LodgingItem | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -249,6 +262,8 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
     setFieldErrors([]);
     setError(undefined);
     setStale(null);
+    setFromListing(false);
+    setSources([]);
   }
 
   function startCreate() {
@@ -268,7 +283,41 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
     if (!stay) return;
     const prefill = lodgingFromCatalogStay(stay);
     setForm((f) => ({ ...formFromFields({ ...prefill }), ...pickKept(f) }));
+    setFromListing(false);
+    setSources([]);
     if (!editing) setEditing({ mode: "create" });
+  }
+
+  async function fillFromLink() {
+    const listingUrl = form.listingUrl.trim();
+    if (!listingUrl) {
+      setFieldErrors([{ field: "listingUrl", message: "Enter an https listing link" }]);
+      return;
+    }
+    setFilling(true);
+    setFieldErrors([]);
+    setError(undefined);
+    try {
+      const facts = await readListingLink(client, tripId, listingUrl);
+      setForm((f) => ({
+        ...f,
+        name: facts.name ?? f.name,
+        address: facts.address ?? f.address,
+        sleeps: facts.sleeps === undefined ? f.sleeps : String(facts.sleeps),
+        nightlyPrice: facts.nightlyPrice ?? f.nightlyPrice,
+        catalogStayId: "",
+        features: [],
+      }));
+      setFromListing(true);
+      setSources((facts.sources ?? []).filter((url) => url.startsWith("https://")));
+      toast.success("Filled from the listing. Check the details, then save.");
+    } catch (err) {
+      const described = describeError(err);
+      setFieldErrors(described.fields);
+      setError(described.message);
+    } finally {
+      setFilling(false);
+    }
   }
 
   function pickKept(f: LodgingForm): Partial<LodgingForm> {
@@ -525,6 +574,29 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
               error={errorFor("listingUrl")}
               onChange={(e) => set("listingUrl", e.target.value)}
             />
+            <Button
+              type="button"
+              variant="secondary"
+              loading={filling}
+              disabled={form.listingUrl.trim() === ""}
+              onClick={() => void fillFromLink()}
+            >
+              Fill from link
+            </Button>
+            <p className="lodging-form__hint">
+              TripWise reads the public page and searches the web for the name, address, sleeps, and nightly price. The stay is saved when you submit the form.
+            </p>
+            {sources.length > 0 && (
+              <ul className="lodging-form__sources">
+                {sources.map((url) => (
+                  <li key={url}>
+                    <a href={url} target="_blank" rel="noreferrer">
+                      {sourceLabel(url)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
             <TextInput
               label="Address"
               value={form.address}
@@ -565,7 +637,7 @@ export function Lodging({ tripId, items, members, onChanged, catalog: catalogPro
                 inputMode="decimal"
                 required
                 value={form.nightlyPrice}
-                hint={linkedStay ? formatEstimate(linkedStay.nightlyPrice, "night") : undefined}
+                hint={fromListing ? "Estimated from the listing page. Check it before saving." : linkedStay ? formatEstimate(linkedStay.nightlyPrice, "night") : undefined}
                 error={errorFor("nightlyPriceCents")}
                 onChange={(e) => set("nightlyPrice", e.target.value)}
               />

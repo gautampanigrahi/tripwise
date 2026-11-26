@@ -92,7 +92,7 @@ async function setup() {
     return { status: res.statusCode, body: JSON.parse(res.body) };
   };
   const writes = () => repos.table.calls.slice(setupCalls).filter((c) => WRITE_METHODS.has(c.method));
-  return { call, writes };
+  return { call, writes, repos };
 }
 
 const prompt = () => br.commandCalls(ConverseCommand)[0]!.args[0].input;
@@ -221,5 +221,66 @@ describe('drafts handler', () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await expectFailure(await pending, 'TIMEOUT', writes);
+  });
+
+  it('proposes a move and a removal for named itinerary stops and stores nothing', async () => {
+    const { call, repos } = await setup();
+    const stamp = { createdAt: '2025-06-01T00:00:00Z', lastModifiedBy: 'host', lastModifiedAt: '2025-06-01T00:00:00Z' };
+    await repos.planItems.create({
+      tripId: 't1',
+      itemId: 'item-park',
+      section: 'Itinerary',
+      fields: { day: '2025-06-13', startTime: '09:00', stopName: 'Balboa Park' },
+      ...stamp,
+    });
+    await repos.planItems.create({
+      tripId: 't1',
+      itemId: 'item-cove',
+      section: 'Itinerary',
+      fields: { day: '2025-06-13', startTime: '10:00', stopName: 'La Jolla Cove' },
+      ...stamp,
+    });
+    br.on(ConverseCommand).resolves(
+      reply(
+        JSON.stringify([
+          { action: 'update', section: 'Itinerary', match: 'Balboa', fields: { day: '2025-06-14' } },
+          { section: 'Itinerary', fields: { day: '2025-06-14', startTime: '09:00', stopName: 'Balboa Park' } },
+          { action: 'delete', section: 'Itinerary', match: 'La Jolla Cove' },
+          { section: 'Groceries', fields: { name: 'Sunscreen', quantity: 1 } },
+        ]),
+      ),
+    );
+
+    const created = repos.table.calls.length;
+    const res = await call({ notes: 'Move Balboa Park to June 14 and remove La Jolla Cove' });
+    expect(res.status).toBe(200);
+    const user = prompt().messages?.[0]?.content?.[0]?.text ?? '';
+    expect(user).toContain('Balboa Park | 2025-06-13 | 09:00');
+    expect(user).not.toContain('item-park');
+    expect(user).not.toContain('item-cove');
+    expect(res.body.drafts).toEqual([
+      {
+        draftId: 'd1',
+        section: 'Itinerary',
+        action: 'update',
+        fields: { day: '2025-06-14', startTime: '09:00', stopName: 'Balboa Park' },
+        valid: true,
+        errors: [],
+        targetItemId: 'item-park',
+        expectedLastModifiedAt: '2025-06-01T00:00:00Z',
+        before: { stopName: 'Balboa Park', day: '2025-06-13', startTime: '09:00' },
+      },
+      {
+        draftId: 'd2',
+        section: 'Itinerary',
+        action: 'delete',
+        fields: { day: '2025-06-13', startTime: '10:00', stopName: 'La Jolla Cove' },
+        valid: true,
+        errors: [],
+        targetItemId: 'item-cove',
+        before: { stopName: 'La Jolla Cove', day: '2025-06-13', startTime: '10:00' },
+      },
+    ]);
+    expect(repos.table.calls.slice(created).filter((c) => WRITE_METHODS.has(c.method))).toEqual([]);
   });
 });

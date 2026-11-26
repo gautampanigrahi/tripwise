@@ -15,7 +15,16 @@ export {
   parseDraftResponse,
   filterDraftSections,
   draftIsAboutNotes,
+  matchItineraryStop,
   resolveMemberName,
   groundDraftCosts,
 } from './drafting.js';
-export type { DraftingSection, DraftPromptInput, DraftItem, DraftResponse, DraftRequest } from './drafting.js';
+export type {
+  DraftingSection,
+  DraftPromptInput,
+  DraftItem,
+  DraftResponse,
+  DraftRequest,
+  ItineraryStopLine,
+  ParsedDraftEntry,
+} from './drafting.js';

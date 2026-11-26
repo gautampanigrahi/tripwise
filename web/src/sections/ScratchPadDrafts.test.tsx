@@ -54,6 +54,41 @@ const stamp = { tripId: "t1", lastModifiedBy: "u-ana", lastModifiedAt: "2025-06-
 const render = (el: ReactElement) =>
   renderToStaticMarkup(<ApiClientProvider client={{} as ApiClient}>{el}</ApiClientProvider>);
 
+describe("acceptDraft", () => {
+  const fields = { day: "2025-06-14", startTime: "09:00", stopName: "Balboa Park" };
+  const before = { stopName: "Balboa Park", day: "2025-06-13", startTime: "09:00" };
+
+  it("updates the matched stop when a move is accepted", async () => {
+    const { client, calls } = scriptedClient({
+      "PUT /trips/t1/sections/Itinerary/items/stop1": { status: 200, body: { itemId: "stop1", section: "Itinerary", fields, ...stamp } },
+    });
+    const outcome = await acceptDraft(
+      client,
+      "t1",
+      draft({ section: "Itinerary", action: "update", fields, targetItemId: "stop1", expectedLastModifiedAt: stamp.lastModifiedAt, before }),
+      "u-ana",
+    );
+    expect(outcome).toEqual({ ok: true, claimed: false, claimFailed: false });
+    expect(calls).toEqual([
+      { method: "PUT", path: "/trips/t1/sections/Itinerary/items/stop1", body: { fields, expectedLastModifiedAt: stamp.lastModifiedAt } },
+    ]);
+  });
+
+  it("deletes the matched stop when a removal is accepted", async () => {
+    const { client, calls } = scriptedClient({
+      "DELETE /trips/t1/sections/Itinerary/items/stop1": { status: 200, body: {} },
+    });
+    const outcome = await acceptDraft(
+      client,
+      "t1",
+      draft({ section: "Itinerary", action: "delete", fields, targetItemId: "stop1", before }),
+      "u-ana",
+    );
+    expect(outcome).toEqual({ ok: true, claimed: false, claimFailed: false });
+    expect(calls.map((c) => [c.method, c.path])).toEqual([["DELETE", "/trips/t1/sections/Itinerary/items/stop1"]]);
+  });
+});
+
 describe("createDrafts", () => {
   it("posts selected item IDs and notes, leaving out empty values", async () => {
     const drafts = [draft({ section: "Checklist", fields: { task: "Pack sunscreen" } })];

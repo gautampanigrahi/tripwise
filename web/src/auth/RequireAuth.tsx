@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Hub } from "aws-amplify/utils";
+import { hasPendingInvite } from "../router";
 import { getIdToken as defaultGetIdToken, signIn as defaultSignIn } from "./amplify";
 import { Button, LogoMark, SpinnerIcon } from "../ui";
 
@@ -59,7 +60,11 @@ export function RequireAuth({
             TripWise
           </h1>
           <p>Plan group trips together and check that the plan works before you book.</p>
-          <p>Sign in to see your trips.</p>
+          <p>
+            {hasPendingInvite()
+              ? "This is a trip invitation. Sign in with the email the invite was sent to, and TripWise will add you to the trip."
+              : "Sign in to see your trips."}
+          </p>
           <Button size="lg" block onClick={() => void onSignIn()}>
             Sign in
           </Button>

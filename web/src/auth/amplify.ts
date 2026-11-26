@@ -3,6 +3,7 @@ import type { KeyValueStorageInterface } from "aws-amplify/utils";
 import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
 import { fetchAuthSession, signInWithRedirect, signOut } from "aws-amplify/auth";
 import type { AppConfig } from "../config";
+import { currentInvitePath } from "../router";
 
 /**
  * Token storage that lives only in memory (design: "keeps tokens in memory").
@@ -59,7 +60,10 @@ export async function getIdToken(): Promise<string | null> {
 }
 
 export function signIn(): Promise<void> {
-  return signInWithRedirect();
+  // The invite path travels in the OAuth `state` parameter, which survives the Hosted UI
+  // redirect. Session storage does not, so sign-in was returning to `/` and never accepting.
+  const returnTo = currentInvitePath();
+  return returnTo ? signInWithRedirect({ customState: returnTo }) : signInWithRedirect();
 }
 
 export function signOutUser(): Promise<void> {

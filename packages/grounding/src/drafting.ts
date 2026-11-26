@@ -28,13 +28,22 @@ export const DraftRequestSchema = z.strictObject({
 });
 export type DraftRequest = z.infer<typeof DraftRequestSchema>;
 
-/** The only values that may reach the draft prompt (Req 22.5, 22.6). */
+/** One existing itinerary stop the model may move or remove. Names and times only, never an item id. */
+export interface ItineraryStopLine {
+  stopName: string;
+  day: string;
+  startTime: string;
+}
+
+/** The only values that may reach the draft prompt (Req 22.5, 22.6), plus the current itinerary stops so a note can move or remove one. */
 export interface DraftPromptInput {
   notes: string;
   trip: { startDate: IsoDate; endDate: IsoDate; destination: string };
   travelerCount?: number;
   /** Display names only, never IDs or emails. */
   memberNames: string[];
+  /** Current itinerary stops. Omitted when the trip has none. */
+  itinerary?: readonly ItineraryStopLine[];
 }
 
 export interface DraftItem {
@@ -49,6 +58,14 @@ export interface DraftItem {
   errors: FieldError[];
   /** Checklist only: the resolved claimer, kept out of `fields` because `claimedBy` is server-controlled. */
   suggestedClaimedBy?: string;
+  /** Present when the note changes an existing itinerary stop. Omitted for a new item. */
+  action?: 'update' | 'delete';
+  /** The itinerary Plan_Item this draft will change. */
+  targetItemId?: string;
+  /** Stored lastModifiedAt, sent back with an update so a stale stop is not overwritten. */
+  expectedLastModifiedAt?: string;
+  /** The stop as it is now, so the card can say what moves or gets removed. */
+  before?: { stopName: string; day: string; startTime: string };
 }
 
 export interface DraftResponse {
@@ -71,6 +88,11 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
     'Do not plan the flight, the landing, the hotel, meals, or the rest of the day unless the notes say so.',
     'The destination and trip dates are only for filling in a date the notes already imply.',
     'If the notes do not name a plan item, return [].',
+    'When the notes move, reschedule, or remove an existing itinerary stop, return that change instead of a new item.',
+    'To move a stop, return {"action":"update","section":"Itinerary","match":"<stop name>","fields":{"day":"YYYY-MM-DD"}} with only the fields that change.',
+    'To remove a stop, return {"action":"delete","section":"Itinerary","match":"<stop name>","fields":{}}.',
+    'When more than one stop has the same name, set "fromDay" to the current YYYY-MM-DD of the one the notes mean.',
+    'Do not update or delete a stop unless the notes ask for that change.',
     'Use YYYY-MM-DD dates within the trip dates and HH:mm 24-hour times.',
     'When a field names a person, use a Member display name from the list exactly as written.',
     'Give costCents (integer cents) only when the notes state a price. Do not invent prices.',
@@ -85,6 +107,10 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
   ];
   if (input.travelerCount !== undefined) facts.push(`Traveler count: ${input.travelerCount}`);
   facts.push(`Member display names: ${input.memberNames.join(', ')}`);
+  if (input.itinerary && input.itinerary.length > 0) {
+    const lines = input.itinerary.map((stop) => `- ${stop.stopName} | ${stop.day} | ${stop.startTime}`);
+    facts.push(`Existing itinerary stops:\n${lines.join('\n')}`);
+  }
 
   const user = [
     facts.join('\n'),
@@ -94,7 +120,16 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
   return { system, user };
 }
 
-type ParsedEntry = { section: string; fields: Record<string, unknown> };
+export interface ParsedDraftEntry {
+  section: string;
+  fields: Record<string, unknown>;
+  /** Set only for a move or a removal. A new item leaves this unset. */
+  action?: 'update' | 'delete';
+  /** Stop name the notes refer to, for update and delete. */
+  match?: string;
+  /** Current day, when the notes pick one of several stops with the same name. */
+  fromDay?: string;
+}
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -142,7 +177,7 @@ function firstJson(text: string): unknown {
  */
 export function parseDraftResponse(
   text: string,
-): { ok: true; items: ParsedEntry[] } | { ok: false } {
+): { ok: true; items: ParsedDraftEntry[] } | { ok: false } {
   const unfenced = text.replace(/```[a-zA-Z]*/g, '');
   const json = firstJson(unfenced);
   if (json === undefined) return { ok: false };
@@ -153,11 +188,16 @@ export function parseDraftResponse(
   else if (isPlainObject(json) && Array.isArray(json.drafts)) entries = json.drafts;
   else entries = [json];
 
-  const items: ParsedEntry[] = [];
+  const items: ParsedDraftEntry[] = [];
   for (const e of entries) {
-    if (isPlainObject(e) && typeof e.section === 'string' && isPlainObject(e.fields)) {
-      items.push({ section: e.section, fields: { ...e.fields } });
-    }
+    if (!isPlainObject(e) || typeof e.section !== 'string') continue;
+    const fields = isPlainObject(e.fields) ? { ...e.fields } : e.action === 'delete' ? {} : undefined;
+    if (!fields) continue;
+    const item: ParsedDraftEntry = { section: e.section, fields };
+    if (e.action === 'update' || e.action === 'delete') item.action = e.action;
+    if (typeof e.match === 'string' && e.match.trim() !== '') item.match = e.match.trim();
+    if (typeof e.fromDay === 'string' && e.fromDay.trim() !== '') item.fromDay = e.fromDay.trim();
+    items.push(item);
   }
   return { ok: true, items };
 }
@@ -183,17 +223,41 @@ function noteWords(text: string): string[] {
  * True when a draft repeats something the notes actually said.
  * "I want to go to the beach" keeps a beach stop and drops an invented landing plan.
  */
-export function draftIsAboutNotes(fields: Record<string, unknown>, notes: string): boolean {
+export function draftIsAboutNotes(fields: Record<string, unknown>, notes: string, also?: string): boolean {
   const noted = noteWords(notes);
   if (noted.length === 0) return false;
   const said = noteWords(
-    Object.values(fields)
-      .filter((value): value is string => typeof value === 'string')
-      .join(' '),
+    [also ?? '', ...Object.values(fields).filter((value): value is string => typeof value === 'string')].join(' '),
   );
   return said.some((word) =>
     noted.some((note) => word === note || (word.length >= 4 && note.length >= 4 && (word.startsWith(note) || note.startsWith(word)))),
   );
+}
+
+/**
+ * The one stop `match` names, or 'none' / 'many'.
+ * `fromDay` narrows the search when two stops share a name.
+ * A single partial name matches ("balboa" matches "Balboa Park") when exactly one stop fits.
+ */
+export function matchItineraryStop<T extends { stopName: string; day: string }>(
+  stops: readonly T[],
+  match: string,
+  fromDay?: string,
+): T | 'none' | 'many' {
+  const wanted = match.trim().toLowerCase();
+  if (!wanted) return 'none';
+  const pool = fromDay ? stops.filter((stop) => stop.day === fromDay) : stops;
+  const named = (stop: T) => stop.stopName.trim().toLowerCase();
+  const exact = pool.filter((stop) => named(stop) === wanted);
+  if (exact.length === 1) return exact[0]!;
+  if (exact.length > 1) return 'many';
+  const partial = pool.filter((stop) => {
+    const name = named(stop);
+    return name.includes(wanted) || wanted.includes(name);
+  });
+  if (partial.length === 1) return partial[0]!;
+  if (partial.length > 1) return 'many';
+  return 'none';
 }
 
 /** Keeps only items in a Drafting_Section, in order (Req 22.9). Apply before the 20-item cap. */

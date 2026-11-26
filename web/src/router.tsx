@@ -47,24 +47,81 @@ export const tripPath = (tripId: string) => `/trips/${encodeURIComponent(tripId)
 export const acceptInvitePath = (inviteId: string) =>
   `/invitations/${encodeURIComponent(inviteId)}/accept`;
 
+/** Hosted UI is mid-redirect; Amplify still needs `?code=` on this URL. */
+function oauthReturnPending(): boolean {
+  const { search } = window.location;
+  return search.includes("code=") || search.includes("error=");
+}
+
 /**
  * The Hosted UI sign-in redirects back to `/`, which would drop a deep link such as an
  * invitation accept link. Call before auth to remember the path, and after auth to restore it.
+ * The saved path stays until `clearDeepLink` (a successful accept, or leaving on purpose).
+ * Opening the accept link used to save the path and then delete it on the same page, so
+ * sign-in always landed on the trip list and Accept never ran.
  */
 export function rememberDeepLink(): void {
-  const { pathname, search } = window.location;
-  if (pathname !== "/" && !search.includes("code=")) {
+  const { pathname } = window.location;
+  if (pathname !== "/" && !oauthReturnPending()) {
     window.sessionStorage.setItem(RETURN_TO_KEY, pathname);
   }
 }
 
+/** Drops a remembered invite link so later visits to `/` stay on the trip list. */
+export function clearDeepLink(): void {
+  window.sessionStorage.removeItem(RETURN_TO_KEY);
+}
+
+/** True when this page, or the path saved across sign-in, is an invitation accept link. */
+export function hasPendingInvite(): boolean {
+  return currentInvitePath() !== undefined;
+}
+
+/**
+ * Accept path to round-trip through the Hosted UI. Session storage alone is wiped by the
+ * cross-site redirect, which is why sign-in was landing on the empty trip list.
+ */
+export function currentInvitePath(): string | undefined {
+  const current = window.location.pathname;
+  if (matchRoute(current).name === "acceptInvite") return current;
+  const saved = window.sessionStorage.getItem(RETURN_TO_KEY);
+  if (saved && matchRoute(saved).name === "acceptInvite") return saved;
+  return undefined;
+}
+
+/** Stores an invite path that came back from the Hosted UI `state` parameter. */
+export function rememberOAuthReturn(value: unknown): void {
+  const path = invitePathFromOAuthState(value);
+  if (path) window.sessionStorage.setItem(RETURN_TO_KEY, path);
+}
+
+/**
+ * Amplify hex-encodes `customState`. Cognito sometimes hands that hex back still encoded,
+ * so a plain path and one hex decoding are both accepted.
+ */
+export function invitePathFromOAuthState(value: unknown): string | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  if (matchRoute(value).name === "acceptInvite") return value;
+  if (/^[0-9a-f]+$/i.test(value) && value.length % 2 === 0) {
+    const decoded = value
+      .match(/.{2}/g)!
+      .map((byte) => String.fromCharCode(parseInt(byte, 16)))
+      .join("");
+    if (matchRoute(decoded).name === "acceptInvite") return decoded;
+  }
+  return undefined;
+}
+
 export function restoreDeepLink(): void {
+  if (oauthReturnPending()) return;
   const saved = window.sessionStorage.getItem(RETURN_TO_KEY);
   if (!saved) return;
-  window.sessionStorage.removeItem(RETURN_TO_KEY);
-  if (saved !== window.location.pathname && matchRoute(saved).name !== "notFound") {
-    navigate(saved, { replace: true });
+  if (matchRoute(saved).name === "notFound") {
+    clearDeepLink();
+    return;
   }
+  if (saved === window.location.pathname) return;
+  navigate(saved, { replace: true });
 }
 
 /** Anchor that navigates with the History API on plain left-clicks. */

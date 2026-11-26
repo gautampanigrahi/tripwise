@@ -1,5 +1,6 @@
 import { confirmationKey, parseSection, stamp, validatePlanItem, type PlanItem, type Section } from '@tripwise/shared';
 import { locatePlace, type PlaceLookup, type PlacePoint } from '../adapters/placeLocate.js';
+import { ListingError, readListing, type ListingFacts } from '../adapters/listingRead.js';
 import { createS3ConfirmationStore, type ConfirmationStore } from '../adapters/s3.js';
 import { HttpError, json, type HttpResult } from '../lib/http.js';
 import { dispatch, type ApiEvent, type RouteDef, type RouteRequest } from '../lib/routes.js';
@@ -16,6 +17,8 @@ export type ItemsDeps = Repos & {
   files: ConfirmationStore;
   /** Fills a missing itinerary pin. Defaults to the model-assisted map search. */
   locatePlace?: (input: PlaceLookup) => Promise<PlacePoint | null>;
+  /** Reads a public listing page into lodging fields. Defaults to the model-assisted reader. */
+  readListing?: (listingUrl: string) => Promise<ListingFacts>;
 };
 
 type Req = RouteRequest<ItemsDeps>;
@@ -174,6 +177,23 @@ async function confirmationDownload(req: Req): Promise<HttpResult> {
   if (typeof key !== 'string') throw new HttpError('NOT_FOUND');
   return json(200, { url: await req.deps.files.downloadUrl(key) });
 }
+async function lodgingFromLink(req: Req): Promise<HttpResult> {
+  const raw = bodyOf(req.event).listingUrl;
+  if (typeof raw !== 'string' || raw.trim() === '') throw validationError('listingUrl', 'Enter an https listing link');
+  const read = req.deps.readListing ?? readListing;
+  try {
+    return json(200, await read(raw.trim()));
+  } catch (err) {
+    if (err instanceof ListingError && err.code === 'INVALID_URL') {
+      throw validationError('listingUrl', 'Enter an https listing link');
+    }
+    if (err instanceof ListingError && err.code === 'BLOCKED') {
+      throw validationError('listingUrl', 'That link cannot be opened');
+    }
+    throw new HttpError('LISTING_UNREADABLE', { message: 'The listing page did not include details to fill in.' });
+  }
+}
+
 const ITEMS = '/trips/{tripId}/sections/{section}/items';
 
 export const routes: RouteDef<ItemsDeps>[] = [
@@ -184,6 +204,7 @@ export const routes: RouteDef<ItemsDeps>[] = [
   { routeKey: 'POST /trips/{tripId}/sections/Checklist/items/{itemId}/claim', guard: 'write', run: claimItem },
   { routeKey: 'POST /trips/{tripId}/items/{itemId}/confirmation-upload', guard: 'write', run: confirmationUpload },
   { routeKey: 'GET /trips/{tripId}/items/{itemId}/confirmation', guard: 'read', run: confirmationDownload },
+  { routeKey: 'POST /trips/{tripId}/lodging/from-link', guard: 'write', run: lodgingFromLink },
 ];
 
 let deps: ItemsDeps | undefined;

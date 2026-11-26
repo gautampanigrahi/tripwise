@@ -4,7 +4,7 @@ import { validatePlanItem, type FieldError, type ValidationContext } from "@trip
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError, type ApiClient } from "../api/client";
 import { createDrafts, type DraftingSection, type DraftItem } from "../api/drafts";
-import { claimItem, createItem } from "../api/items";
+import { claimItem, createItem, deleteItem, updateItem } from "../api/items";
 import { memberName } from "../components/LastModified";
 import { Badge, Button, Card, Checkbox, Drawer, EmptyState, Select, TextArea, TextInput, useToast } from "../ui";
 import { centsToDollars, dollarsToCents, errorsFor, formatUsd, type MemberOption } from "./planSectionHelpers";
@@ -136,9 +136,60 @@ export type AcceptOutcome =
   | { ok: true; claimed: boolean; claimFailed: boolean }
   | { ok: false; rejected: boolean; errors: FieldError[]; message: string };
 
+function rejectChange(draft: DraftItem, message: string): AcceptOutcome {
+  return { ok: false, rejected: false, errors: draft.errors, message };
+}
+
+/** Applies an accepted move or removal. A missing match never creates a new stop. */
+async function acceptItineraryChange(client: ApiClient, tripId: string, draft: DraftItem): Promise<AcceptOutcome> {
+  if (!draft.targetItemId) return rejectChange(draft, "No itinerary stop matched this note.");
+  try {
+    if (draft.action === "delete") {
+      await deleteItem(client, tripId, "Itinerary", draft.targetItemId);
+      return { ok: true, claimed: false, claimFailed: false };
+    }
+    if (!draft.expectedLastModifiedAt) return rejectChange(draft, "No itinerary stop matched this note.");
+    const updated = await updateItem(client, tripId, "Itinerary", draft.targetItemId, draft.fields, draft.expectedLastModifiedAt);
+    if (!updated.ok) return rejectChange(draft, "This stop changed. Create drafts again.");
+    return { ok: true, claimed: false, claimFailed: false };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 400) {
+      const body = err.body as { fields?: unknown } | undefined;
+      const errors = Array.isArray(body?.fields) ? (body.fields as FieldError[]) : [];
+      return {
+        ok: false,
+        rejected: true,
+        errors: errors.length > 0 ? errors : [{ field: "fields", message: "The draft was rejected." }],
+        message: "Please fix the highlighted fields.",
+      };
+    }
+    return rejectChange(draft, err instanceof ApiError ? `Could not save the draft (${err.status}).` : "Could not save the draft.");
+  }
+}
+
+function savedLabel(draft: DraftItem): string {
+  const name = draft.before?.stopName ?? draftLabel(draft);
+  if (draft.action === "delete") return `Removed ${name} from the itinerary`;
+  if (draft.action === "update") return `Updated ${name} on the itinerary`;
+  return `Added to ${draft.section}`;
+}
+
+/** What a move or removal will do, shown on the draft card before anything is saved. */
+function changeLine(draft: DraftItem): string | undefined {
+  const name = draft.before?.stopName;
+  if (!draft.action || !name) return undefined;
+  if (draft.action === "delete") return `Remove ${name} from the itinerary.`;
+  const nextDay = typeof draft.fields.day === "string" ? draft.fields.day : undefined;
+  if (draft.before?.day && nextDay && draft.before.day !== nextDay) {
+    return `Move ${name} from ${draft.before.day} to ${nextDay}.`;
+  }
+  return `Update ${name} on the itinerary.`;
+}
+
 /**
- * Saves one draft with the existing create route. For a Checklist draft whose suggested claimer is the
- * accepting Member, the item is then claimed through the existing claim route (Req 22.19).
+ * Saves one draft. A new item uses the create route. A move updates the matched itinerary stop,
+ * and a removal deletes it. Nothing is written until the Member accepts. For a Checklist draft
+ * whose suggested claimer is the accepting Member, the item is then claimed (Req 22.19).
  */
 export async function acceptDraft(
   client: ApiClient,
@@ -146,6 +197,9 @@ export async function acceptDraft(
   draft: DraftItem,
   currentUserId: string | undefined,
 ): Promise<AcceptOutcome> {
+  if (draft.action === "delete" || draft.action === "update") {
+    return acceptItineraryChange(client, tripId, draft);
+  }
   let itemId: string;
   try {
     const created = await createItem(client, tripId, draft.section, draft.fields);
@@ -276,7 +330,7 @@ export function ScratchPadDrafts({ tripId, selectedIds, members, trip, currentUs
     try {
       const outcome = await acceptDraft(client, tripId, draft, currentUserId);
       if (applyOutcome(draft, outcome)) {
-        toast.success(`Added to ${draft.section}`);
+        toast.success(savedLabel(draft));
         await onChanged();
       }
     } finally {
@@ -325,7 +379,7 @@ export function ScratchPadDrafts({ tripId, selectedIds, members, trip, currentUs
       <Card
         className="draft-ai"
         title="Draft with AI"
-        subtitle="Suggestions come only from the notes you select or type. Review them before anything is saved."
+        subtitle="A note can add a plan item, move an itinerary stop to another day, or remove that stop. Nothing is saved until you accept it."
       >
         <div className="draft-ai__body">
           <p className="draft-ai__selection">
@@ -449,10 +503,13 @@ export function DraftList({
               const isSaving = saving.has(draft.draftId);
               const editing = editingId === draft.draftId;
               const label = draftLabel(draft);
+              const verb = draft.action === "delete" ? "Remove" : draft.action === "update" ? "Apply" : "Accept";
+              const change = changeLine(draft);
               return (
                 <Card as="li" compact key={draft.draftId} className="draft-card">
                   <div className="draft-card__badges">
                     <Badge tone="accent">{draft.section}</Badge>
+                    {change && <p className="draft-card__suggested">{change}</p>}
                     {!draft.valid && <Badge tone="danger">Invalid</Badge>}
                   </div>
                   {editing ? (
@@ -524,15 +581,17 @@ export function DraftList({
                   )}
                   {!editing && (
                     <div className="draft-card__actions">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onEdit(draft)}
-                        disabled={isSaving || disabled}
-                        aria-label={`Edit draft ${label}`}
-                      >
-                        Edit
-                      </Button>
+                      {!draft.action && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEdit(draft)}
+                          disabled={isSaving || disabled}
+                          aria-label={`Edit draft ${label}`}
+                        >
+                          Edit
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -547,9 +606,9 @@ export function DraftList({
                         onClick={() => onAccept(draft)}
                         loading={isSaving}
                         disabled={disabled}
-                        aria-label={`Accept draft ${label}`}
+                        aria-label={`${verb} draft ${label}`}
                       >
-                        Accept
+                        {verb}
                       </Button>
                     </div>
                   )}

@@ -24,6 +24,7 @@ describe('error mapping', () => {
       UNKNOWN_ACTIVITY: 422,
       NO_BASE_RESULT: 422,
       SUMMARY_UNGROUNDED: 422,
+      LISTING_UNREADABLE: 422,
       CATALOG_INVALID: 500,
       INTERNAL: 500,
     });

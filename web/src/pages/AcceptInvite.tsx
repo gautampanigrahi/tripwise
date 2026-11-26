@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/client";
 import { acceptInvitation, describeApiError } from "../api/trips";
-import { Link, navigate, tripPath } from "../router";
+import { useCurrentUser } from "../auth/user";
+import { clearDeepLink, Link, navigate, tripPath } from "../router";
 import { Button, CheckCircleIcon, EmptyState, ErrorState, useBreadcrumbs } from "../ui";
 import "./TripsPage.css";
 
@@ -14,11 +15,15 @@ type Status = "idle" | "accepting" | "accepted" | "error";
 /** Accepts an invitation for the signed-in User (Req 3.3); shows the 403 mismatch case (Req 3.5). */
 export function AcceptInvite({ inviteId }: { inviteId: string }) {
   const client = useApiClient();
-  const [status, setStatus] = useState<Status>("idle");
+  const user = useCurrentUser();
+  const [status, setStatus] = useState<Status>("accepting");
   const [error, setError] = useState<{ title: string; message: string } | null>(null);
   const [tripId, setTripId] = useState<string | null>(null);
   const successRef = useRef<HTMLDivElement>(null);
   useBreadcrumbs([{ label: "Invitation" }]);
+  const signedInAs = user?.email ?? "this account";
+  const signedInAsRef = useRef(signedInAs);
+  signedInAsRef.current = signedInAs;
 
   useEffect(() => {
     if (status !== "accepted" || !tripId) return;
@@ -27,11 +32,12 @@ export function AcceptInvite({ inviteId }: { inviteId: string }) {
     return () => window.clearTimeout(timer);
   }, [status, tripId]);
 
-  const accept = async () => {
+  const accept = useCallback(async () => {
     setStatus("accepting");
     setError(null);
     try {
       const result = await acceptInvitation(client, inviteId);
+      clearDeepLink();
       setTripId(result.tripId);
       setStatus("accepted");
     } catch (err) {
@@ -39,8 +45,7 @@ export function AcceptInvite({ inviteId }: { inviteId: string }) {
       if (err instanceof ApiError && err.status === 403) {
         setError({
           title: "This invitation is for someone else",
-          message:
-            "This invitation was sent to a different email address than the one you signed in with. Sign in with the invited email, or ask the Host to invite this address.",
+          message: `This invitation was sent to a different email than ${signedInAsRef.current}. Sign out, then sign in with the invited email.`,
         });
       } else if (err instanceof ApiError && err.status === 409) {
         setError({
@@ -51,10 +56,16 @@ export function AcceptInvite({ inviteId }: { inviteId: string }) {
         setError({ title: "We couldn't accept the invitation", message: describeApiError(err) });
       }
     }
-  };
+  }, [client, inviteId]);
+
+  // Joining happens as soon as this page is shown signed-in. The button used to wait for a
+  // second click, and that click never happened: sign-in returned to the trip list instead.
+  useEffect(() => {
+    void accept();
+  }, [accept]);
 
   const backLink = (
-    <Link to="/" className="accept-invite__back">
+    <Link to="/" className="accept-invite__back" onClick={() => clearDeepLink()}>
       Back to your trips
     </Link>
   );
@@ -94,7 +105,7 @@ export function AcceptInvite({ inviteId }: { inviteId: string }) {
       <EmptyState
         headingLevel={2}
         title="Trip invitation"
-        description="You have been invited to join a trip on TripWise. Accept to see the plan and start collaborating."
+        description={`You're signed in as ${signedInAs}. Joining this trip uses that account.`}
         action={
           <div className="accept-invite__actions">
             <Button onClick={() => void accept()} loading={status === "accepting"}>

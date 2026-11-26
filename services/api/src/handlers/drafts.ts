@@ -7,14 +7,16 @@ import {
   draftIsAboutNotes,
   filterDraftSections,
   groundDraftCosts,
+  matchItineraryStop,
   parseDraftResponse,
   resolveMemberName,
   type DraftItem,
   type DraftPromptInput,
   type DraftResponse,
   type DraftingSection,
+  type ParsedDraftEntry,
 } from '@tripwise/grounding';
-import { validatePlanItem, type FieldError, type Membership } from '@tripwise/shared';
+import { validatePlanItem, type FieldError, type Membership, type ValidationContext } from '@tripwise/shared';
 import { HttpError, json, type HttpResult } from '../lib/http.js';
 import { log, metrics, MetricUnit } from '../lib/logging.js';
 import { dispatch, type ApiEvent, type RouteDef, type RouteRequest } from '../lib/routes.js';
@@ -151,6 +153,91 @@ function resolvePeople(
   return { fields: out };
 }
 
+interface StopRow {
+  itemId: string;
+  lastModifiedAt: string;
+  stopName: string;
+  day: string;
+  startTime: string;
+  fields: Record<string, unknown>;
+}
+
+/** Itinerary stops the note can move or remove. Rows with no name, day, or start time are skipped. */
+async function itineraryStops(deps: DraftsDeps, tripId: string): Promise<StopRow[]> {
+  const items = await deps.planItems.list(tripId, 'Itinerary');
+  const rows: StopRow[] = [];
+  for (const item of items) {
+    const fields = item.fields as Record<string, unknown>;
+    if (typeof fields.stopName !== 'string' || typeof fields.day !== 'string' || typeof fields.startTime !== 'string') continue;
+    rows.push({
+      itemId: item.itemId,
+      lastModifiedAt: item.lastModifiedAt,
+      stopName: fields.stopName,
+      day: fields.day,
+      startTime: fields.startTime,
+      fields,
+    });
+  }
+  return rows;
+}
+
+/**
+ * A move or removal of one existing stop. A new item with the same name is dropped when a change
+ * already names it, so "move Balboa Park to Sunday" does not also add a second Balboa Park.
+ */
+function prepareEntries(entries: ParsedDraftEntry[], notes: string): ParsedDraftEntry[] {
+  const about = entries.filter((entry) => draftIsAboutNotes(entry.fields, notes, entry.match));
+  const changing = about
+    .filter((entry) => entry.action && entry.section === 'Itinerary' && entry.match)
+    .map((entry) => entry.match!.trim().toLowerCase());
+  return about.filter((entry) => {
+    if (entry.action && entry.section !== 'Itinerary') return false;
+    if (entry.action || entry.section !== 'Itinerary') return true;
+    const name = typeof entry.fields.stopName === 'string' ? entry.fields.stopName.trim().toLowerCase() : '';
+    if (name === '') return true;
+    return !changing.some((match) => name === match || name.includes(match) || match.includes(name));
+  });
+}
+
+function changeDraft(entry: ParsedDraftEntry, stops: StopRow[], ctx: ValidationContext, draftId: string): DraftItem {
+  const match = entry.match ?? '';
+  const found = matchItineraryStop(stops, match, entry.fromDay);
+  const base = {
+    draftId,
+    section: 'Itinerary' as const,
+    action: entry.action,
+    errors: [] as DraftItem['errors'],
+  };
+  if (found === 'none' || found === 'many') {
+    const message =
+      found === 'many'
+        ? `More than one itinerary stop matches "${match}".`
+        : `No itinerary stop matches "${match}".`;
+    return { ...base, fields: entry.fields, valid: false, errors: [{ field: 'match', message }] };
+  }
+  const before = { stopName: found.stopName, day: found.day, startTime: found.startTime };
+  if (entry.action === 'delete') {
+    return {
+      ...base,
+      fields: found.fields,
+      valid: true,
+      targetItemId: found.itemId,
+      before,
+    };
+  }
+  const merged = { ...found.fields, ...entry.fields };
+  const result = validatePlanItem('Itinerary', merged, ctx);
+  return {
+    ...base,
+    fields: result.ok ? result.value : merged,
+    valid: result.ok,
+    errors: result.ok ? [] : result.errors,
+    targetItemId: found.itemId,
+    expectedLastModifiedAt: found.lastModifiedAt,
+    before,
+  };
+}
+
 async function createDrafts(req: Req): Promise<HttpResult> {
   const { deps } = req;
   const tripId = req.tripId!;
@@ -164,12 +251,14 @@ async function createDrafts(req: Req): Promise<HttpResult> {
   ]);
   if (!trip) throw new HttpError('NOT_FOUND');
   const notes = await draftNotesOf(deps, tripId, body.itemIds ?? [], body.notes);
+  const stops = await itineraryStops(deps, tripId);
 
   const input: DraftPromptInput = {
     notes,
     trip: { startDate: trip.startDate, endDate: trip.endDate, destination: trip.destination },
     memberNames: members.map((m) => m.displayName),
   };
+  if (stops.length > 0) input.itinerary = stops.map(({ stopName, day, startTime }) => ({ stopName, day, startTime }));
   if (constraints) input.travelerCount = constraints.travelerCount;
 
   try {
@@ -181,10 +270,10 @@ async function createDrafts(req: Req): Promise<HttpResult> {
       trip: { startDate: trip.startDate, endDate: trip.endDate },
       memberIds: new Set(members.map((m) => m.userId)),
     };
-    const drafts: DraftItem[] = filterDraftSections(parsed.items)
-      .filter((entry) => draftIsAboutNotes(entry.fields, notes))
+    const drafts: DraftItem[] = prepareEntries(filterDraftSections(parsed.items), notes)
       .slice(0, MAX_DRAFT_ITEMS)
       .map((entry) => {
+        if (entry.action) return changeDraft(entry, stops, ctx, deps.newId());
         const people = resolvePeople(entry.section, entry.fields, members);
         const { fields } = groundDraftCosts({ fields: people.fields }, notes);
         const result = validatePlanItem(entry.section, fields, ctx);

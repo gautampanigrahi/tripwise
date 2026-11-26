@@ -9,6 +9,7 @@ import {
   draftIsAboutNotes,
   filterDraftSections,
   groundDraftCosts,
+  matchItineraryStop,
   parseDraftResponse,
   resolveMemberName,
 } from './index.js';
@@ -25,6 +26,8 @@ describe('draftIsAboutNotes', () => {
   it('keeps the beach and drops the invented arrival plan', () => {
     const notes = 'I want to go to the beach';
     expect(draftIsAboutNotes({ stopName: 'Beach' }, notes)).toBe(true);
+    expect(draftIsAboutNotes({ day: '2025-06-14' }, notes, 'Balboa Park')).toBe(false);
+    expect(draftIsAboutNotes({ day: '2025-06-14' }, 'Move Balboa Park to Sunday', 'Balboa Park')).toBe(true);
     expect(draftIsAboutNotes({ stopName: 'Mission Beach' }, notes)).toBe(true);
     expect(draftIsAboutNotes({ stopName: 'Land at the airport' }, notes)).toBe(false);
     expect(draftIsAboutNotes({ name: 'Sunscreen' }, notes)).toBe(false);
@@ -96,6 +99,39 @@ describe('parseDraftResponse', () => {
     expect(parseDraftResponse('Sorry, I cannot help with that.')).toEqual({ ok: false });
     expect(parseDraftResponse('[not json')).toEqual({ ok: false });
     expect(parseDraftResponse('')).toEqual({ ok: false });
+  });
+
+  it('reads a move or a removal and still treats a plain item as a new one', () => {
+    const r = parseDraftResponse(
+      JSON.stringify([
+        { section: 'Itinerary', fields: { day: '2025-06-14', startTime: '09:00', stopName: 'Zoo' } },
+        { action: 'update', section: 'Itinerary', match: 'Balboa Park', fromDay: '2025-06-13', fields: { day: '2025-06-14' } },
+        { action: 'delete', section: 'Itinerary', match: 'La Jolla Cove' },
+      ]),
+    );
+    expect(r).toEqual({
+      ok: true,
+      items: [
+        { section: 'Itinerary', fields: { day: '2025-06-14', startTime: '09:00', stopName: 'Zoo' } },
+        { section: 'Itinerary', fields: { day: '2025-06-14' }, action: 'update', match: 'Balboa Park', fromDay: '2025-06-13' },
+        { section: 'Itinerary', fields: {}, action: 'delete', match: 'La Jolla Cove' },
+      ],
+    });
+  });
+});
+
+describe('matchItineraryStop', () => {
+  const stops = [
+    { stopName: 'Balboa Park', day: '2025-06-13' },
+    { stopName: 'Balboa Park', day: '2025-06-14' },
+    { stopName: 'USS Midway Museum', day: '2025-06-13' },
+  ];
+
+  it('matches one stop by a partial name and uses the day when the name is shared', () => {
+    expect(matchItineraryStop(stops, 'midway')).toMatchObject({ stopName: 'USS Midway Museum' });
+    expect(matchItineraryStop(stops, 'Balboa Park')).toBe('many');
+    expect(matchItineraryStop(stops, 'Balboa Park', '2025-06-14')).toMatchObject({ day: '2025-06-14' });
+    expect(matchItineraryStop(stops, 'the beach')).toBe('none');
   });
 });
 

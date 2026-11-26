@@ -14,7 +14,16 @@ locals {
   private_trips      = "${aws_s3_bucket.data.arn}/private/trips/*"
   topic_arn          = aws_sns_topic.notifications.arn
   reminder_schedules = "arn:${local.partition}:scheduler:${var.region}:${local.account}:schedule/default/${local.reminder_schedule_prefix}*"
-  model_arn          = "arn:${local.partition}:bedrock:${var.region}::foundation-model/${var.model_id}"
+  # Nova 2 Lite rejects on-demand model ids in us-west-2. The us. profile routes to
+  # us-east-1, us-east-2, and us-west-2, and InvokeModel must allow the profile plus those models.
+  inference_profile    = can(regex("^(us|eu|global)\\.", var.model_id))
+  foundation_model_id  = local.inference_profile ? replace(var.model_id, "/^(us|eu|global)\\./", "") : var.model_id
+  model_arns = local.inference_profile ? [
+    "arn:${local.partition}:bedrock:${var.region}:${local.account}:inference-profile/${var.model_id}",
+    "arn:${local.partition}:bedrock:us-east-1::foundation-model/${local.foundation_model_id}",
+    "arn:${local.partition}:bedrock:us-east-2::foundation-model/${local.foundation_model_id}",
+    "arn:${local.partition}:bedrock:us-west-2::foundation-model/${local.foundation_model_id}",
+  ] : ["arn:${local.partition}:bedrock:${var.region}::foundation-model/${var.model_id}"]
 
   # Function ARNs computed from names so trips-fn/checks-fn can reference reminder-fn/explain-fn
   # without a self-reference inside the aws_lambda_function.fn for_each.
@@ -37,7 +46,9 @@ locals {
     items = [
       [["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"], local.table_arns],
       [["s3:PutObject", "s3:GetObject"], [local.private_trips]],
-      [["bedrock:InvokeModel"], [local.model_arn]],
+      [["bedrock:InvokeModel"], local.model_arns],
+      // Nova Web Grounding searches while filling a listing. The tool name is fixed by Bedrock.
+      [["bedrock:InvokeTool"], ["arn:${local.partition}:bedrock::${local.account}:system-tool/amazon.nova_grounding"]],
     ]
     catalog = [
       [["s3:GetObject"], [local.catalog_objects]],
@@ -51,7 +62,7 @@ locals {
     ]
     explain = [
       [["dynamodb:GetItem", "dynamodb:UpdateItem"], local.table_arns],
-      [["bedrock:InvokeModel"], [local.model_arn]],
+      [["bedrock:InvokeModel"], local.model_arns],
     ]
     reminder = [
       [["dynamodb:GetItem", "dynamodb:Query"], local.table_arns],
@@ -61,7 +72,7 @@ locals {
     # no GSI1 reads) plus the one model. No write actions (Req 22.17, 25.3).
     drafts = [
       [["dynamodb:GetItem", "dynamodb:Query"], local.table_arns],
-      [["bedrock:InvokeModel"], [local.model_arn]],
+      [["bedrock:InvokeModel"], local.model_arns],
     ]
   }
 }

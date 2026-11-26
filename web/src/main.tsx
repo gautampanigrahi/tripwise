@@ -1,5 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { Hub } from "aws-amplify/utils";
 // Base tokens and primitives first, so co-located component stylesheets imported below override them.
 import "./styles.css";
 import "aws-amplify/auth/enable-oauth-listener";
@@ -8,7 +9,7 @@ import { configureAuth, getIdToken } from "./auth/amplify";
 import { RequireAuth } from "./auth/RequireAuth";
 import { createApiClient } from "./api/client";
 import { ApiClientProvider } from "./api/ApiClientContext";
-import { Link, matchRoute, rememberDeepLink, restoreDeepLink, usePathname } from "./router";
+import { Link, matchRoute, rememberDeepLink, rememberOAuthReturn, restoreDeepLink, usePathname } from "./router";
 import { TripsPage } from "./pages/TripsPage";
 import { TripPage } from "./pages/TripPage";
 import { AcceptInvite } from "./pages/AcceptInvite";
@@ -20,6 +21,17 @@ configureAuth(config);
 const apiClient = createApiClient({ baseUrl: config.apiUrl, getIdToken });
 // Keep deep links (e.g. invitation accept links) across the Hosted UI sign-in redirect.
 rememberDeepLink();
+// This fires while the sign-in screen is still up, before the trip list mounts.
+Hub.listen("auth", ({ payload }) => {
+  if (payload.event === "customOAuthState") rememberOAuthReturn(payload.data);
+  if (
+    payload.event === "customOAuthState" ||
+    payload.event === "signedIn" ||
+    payload.event === "signInWithRedirect"
+  ) {
+    restoreDeepLink();
+  }
+});
 
 function App() {
   useEffect(() => {

@@ -8,7 +8,7 @@ import { routes, type ItemsDeps } from './items.js';
 
 const ITEMS = '/trips/{tripId}/sections/{section}/items';
 
-async function setup(locatePlace?: ItemsDeps['locatePlace']) {
+async function setup(locatePlace?: ItemsDeps['locatePlace'], readListing?: ItemsDeps['readListing']) {
   const repos = createMemoryRepos();
   await repos.trips.create(
     {
@@ -47,6 +47,7 @@ async function setup(locatePlace?: ItemsDeps['locatePlace']) {
       'data-bucket',
     ),
     locatePlace: locatePlace ?? (async () => null),
+    readListing,
   };
   const handler = dispatch(routes, () => deps);
   const call = async (
@@ -223,5 +224,30 @@ describe('items handler', () => {
     expect(down.status).toBe(200);
     expect(down.body.url).toContain('X-Amz-Expires=900');
     expect(down.body.url).toContain(encodeURI(up.body.key).replace(/\//g, '/'));
+  });
+
+  it('returns listing facts for a member and does not store a stay', async () => {
+    const { call, repos } = await setup(undefined, async () => ({
+      name: 'The Cottage',
+      address: '123 Coast Blvd, San Diego',
+      sleeps: 4,
+      nightlyPrice: '210.00',
+    }));
+    const before = repos.table.calls.length;
+    const res = await call('POST /trips/{tripId}/lodging/from-link', 'member', {}, {
+      listingUrl: 'https://example.com/cottage',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      name: 'The Cottage',
+      address: '123 Coast Blvd, San Diego',
+      sleeps: 4,
+      nightlyPrice: '210.00',
+    });
+    expect(repos.table.calls.slice(before).filter((c) => c.method === 'create')).toEqual([]);
+    const stranger = await call('POST /trips/{tripId}/lodging/from-link', 'stranger', {}, {
+      listingUrl: 'https://example.com/cottage',
+    });
+    expect(stranger.status).toBe(403);
   });
 });
