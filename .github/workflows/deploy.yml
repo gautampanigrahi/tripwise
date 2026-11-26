@@ -1,0 +1,160 @@
+# Deploys TripWise to the production AWS account (design section 11, Req 25.1, 25.2, 28.4).
+#
+# Runs on push to main and on manual dispatch. The CI workflow runs first as a required
+# job; the deploy job then waits for approval in the `production` environment, assumes the
+# deploy role through GitHub OIDC (no stored AWS keys), applies the Terraform plan it just
+# produced, and mirrors the post-apply steps of scripts/deploy.sh.
+#
+# Note: ci.yml also triggers on every push, so a push to main runs the CI checks twice
+# (standalone and through this workflow). That is harmless; to avoid it, add
+# `branches-ignore: [main]` to ci.yml's push trigger.
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      allow_destructive:
+        description: Allow a plan that destroys or replaces the DynamoDB table, Cognito user pool, data bucket, or CloudFront distribution
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to production
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The deploy role trusts only repo:gautampanigrahi/tripwise:environment:production.
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-west-2
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # build-lambdas.mjs shells out to the `zip` CLI. ubuntu-latest ships it;
+      # install it only if a future image drops it.
+      - name: Ensure zip is available
+        run: command -v zip || (sudo apt-get update && sudo apt-get install -y zip)
+
+      - name: Build Lambda bundles
+        run: npm run build:lambdas
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "^1.10.0"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: terraform init
+        run: terraform -chdir=terraform init -input=false
+
+      - name: terraform plan
+        run: |
+          terraform -chdir=terraform plan -input=false -out=tfplan
+          {
+            echo "## Terraform plan"
+            echo
+            echo '```'
+            # Sensitive values are already shown as "(sensitive value)" by Terraform.
+            # The step summary is capped at 1 MiB, so keep the excerpt well below that.
+            terraform -chdir=terraform show -no-color tfplan | head -c 900000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guard stateful resources
+        env:
+          ALLOW_DESTRUCTIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destructive && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          # A replace shows up as ["delete","create"] or ["create","delete"], so checking
+          # for "delete" catches both destroys and replacements.
+          terraform -chdir=terraform show -json tfplan > "$RUNNER_TEMP/tfplan.json"
+          destructive="$(jq -r '
+            [ .resource_changes[]?
+              | select(
+                  (.type == "aws_dynamodb_table" and .name == "main") or
+                  (.type == "aws_cognito_user_pool" and .name == "main") or
+                  (.type == "aws_s3_bucket" and .name == "data") or
+                  (.type == "aws_cloudfront_distribution")
+                )
+              | select(.change.actions | index("delete"))
+              | "\(.address) (\(.change.actions | join("/")))"
+            ] | .[]' "$RUNNER_TEMP/tfplan.json")"
+          rm -f "$RUNNER_TEMP/tfplan.json"
+          if [ -z "$destructive" ]; then
+            echo "No protected resources are destroyed or replaced."
+            exit 0
+          fi
+          echo "The plan destroys or replaces protected resources:"
+          echo "$destructive"
+          if [ "$ALLOW_DESTRUCTIVE" = "true" ]; then
+            echo "::warning::allow_destructive is set; continuing with a destructive plan."
+            exit 0
+          fi
+          echo "::error::Refusing to apply. Re-run with workflow_dispatch and allow_destructive=true if this is intended."
+          exit 1
+
+      - name: terraform apply
+        run: terraform -chdir=terraform apply -input=false tfplan
+
+      - name: Build and upload web app
+        run: |
+          set -euo pipefail
+          out() { terraform -chdir=terraform output -raw "$1"; }
+          APP_URL="$(out AppUrl)"
+          WEB_BUCKET="$(out WebBucketName)"
+          DATA_BUCKET="$(out DataBucketName)"
+          DISTRIBUTION_ID="$(out DistributionId)"
+          # The web app expects the Hosted UI domain without a scheme.
+          COGNITO_DOMAIN="$(out CognitoDomain)"
+          COGNITO_DOMAIN="${COGNITO_DOMAIN#https://}"
+
+          # Written without echoing; the file contents never reach the log.
+          umask 077
+          cat > web/.env.local <<EOF
+          VITE_USER_POOL_ID=$(out UserPoolId)
+          VITE_USER_POOL_CLIENT_ID=$(out UserPoolClientId)
+          VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
+          VITE_API_URL=$(out ApiUrl)
+          EOF
+          echo "Wrote web/.env.local"
+
+          npm run build -w web
+          rm -f web/.env.local
+
+          aws s3 sync web/dist "s3://${WEB_BUCKET}" --delete --only-show-errors
+          aws s3 sync catalog "s3://${DATA_BUCKET}/catalog/" --only-show-errors
+          aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*" >/dev/null
+          echo "Uploaded web app and catalog; invalidated the CloudFront cache."
+
+          {
+            echo "## Deployed"
+            echo
+            echo "App URL: ${APP_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"

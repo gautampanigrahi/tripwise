@@ -1148,6 +1148,95 @@
         "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
         "timestamp": 1795589521930
       }
+    ],
+    "22.1 Write the CI workflow": [
+      {
+        "executionId": "88b9a138-61c2-437c-a4c0-0613eeb7ec4a",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674294170
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674464894
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674741709
+      }
+    ],
+    "22.2 Write the bootstrap Terraform config": [
+      {
+        "executionId": "88b9a138-61c2-437c-a4c0-0613eeb7ec4a",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674294276
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674464952
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674741789
+      }
+    ],
+    "22.3 Move the main config to remote state": [
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674747989
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674870668
+      }
+    ],
+    "22.4 Write the deploy workflow": [
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674748065
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674871459
+      }
+    ],
+    "22.5 Document the one-time CI/CD setup": [
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674871743
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674962418
+      }
+    ],
+    "22.6 Checkpoint - Workflows lint, Terraform validates, and all tests pass": [
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795674961615
+      },
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795675122493
+      }
+    ],
+    "22. Add CI/CD with GitHub Actions": [
+      {
+        "executionId": "1a15b563-874b-4302-be34-14865a01fabd",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795675122577
+      }
     ]
   }
 }

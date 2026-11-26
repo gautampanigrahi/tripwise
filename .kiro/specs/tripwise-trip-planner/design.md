@@ -622,6 +622,26 @@ All roles also get `logs:CreateLogStream, PutLogEvents` on their own log group. 
 
 Checks that replace the removed CDK assertion tests: `terraform fmt -check` and `terraform validate` pass; `services/api/src/routes.test.ts` compares the route table in `services/api/src/routes.ts` with the routes declared in `terraform/` so every route exists and has the authorizer; and the IAM policies in `terraform/` list exact resource ARNs (no `"*"` except where AWS requires it).
 
+#### CI/CD (GitHub Actions)
+
+The repository `github.com/gautampanigrahi/tripwise` uses two workflows. AWS access comes from GitHub OIDC; no AWS keys are stored in GitHub.
+
+- **`.github/workflows/ci.yml`** runs on every push and pull request with `permissions: contents: read` and pinned action major versions. It sets up Node 20 with the npm cache, then runs `npm ci`, `npm run typecheck`, `npx vitest --run` (Req 28.4), `npm run build:lambdas`, and `npm run build -w web`. With `hashicorp/setup-terraform` it runs `terraform fmt -check -recursive` and `terraform init -backend=false` plus `terraform validate` in `terraform/` and `terraform/bootstrap/`.
+- **`.github/workflows/deploy.yml`** runs on push to `main` and on `workflow_dispatch`. It reuses the CI checks as a required first job, then a deploy job in the GitHub `production` environment, which pauses for manual approval by a required reviewer. The deploy job has `permissions: id-token: write, contents: read` and `concurrency: { group: deploy-production, cancel-in-progress: false }`, so deploys queue and never overlap. It gets credentials with `aws-actions/configure-aws-credentials` using `role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}` and region `us-west-2`. Steps: `npm run build:lambdas`; `terraform init`; `terraform plan -out=tfplan`; `terraform apply tfplan` (only the reviewed plan is applied); then the post-apply steps from `scripts/deploy.sh`: write `web/.env.local` from Terraform outputs, `npm run build -w web`, `aws s3 sync web/dist` to `WebBucket` with `--delete`, `aws s3 sync catalog` to `DataBucket` under `catalog/` without `--delete`, and a CloudFront `/*` invalidation. Output values are passed through files or masked step outputs, and no step echoes credentials, tokens, or `.env.local` contents.
+
+**Bootstrap config** (`terraform/bootstrap/`, local state, applied once from a laptop with admin credentials for account `651532007957`, region `us-west-2`) creates:
+
+- The Terraform state bucket (variable `state_bucket_name`): versioning on, SSE-S3, all four public access blocks on, and a bucket policy denying requests where `aws:SecureTransport` is false (Req 25.4, 25.5).
+- The GitHub OIDC provider for `https://token.actions.githubusercontent.com` with client ID `sts.amazonaws.com`.
+- The IAM deploy role. Its trust policy allows `sts:AssumeRoleWithWebIdentity` only from that provider, with `token.actions.githubusercontent.com:aud` equal to `sts.amazonaws.com` and `token.actions.githubusercontent.com:sub` equal to `repo:gautampanigrahi/tripwise:environment:production` (variable `github_repo`). Pull requests and other branches cannot assume it.
+- The deploy role's policy grants what the main Terraform config and the upload steps need: read/write on the state bucket (including the `.tflock` lock object); management of the tripwise-named DynamoDB table, S3 buckets, Lambda functions, log groups, SNS topic, schedules, HTTP API, Cognito resources, CloudFront distribution and OAC, and CloudWatch alarms; `iam:*Role*`/`iam:*RolePolicy*` and `iam:PassRole` limited to `tripwise-*` roles; and `s3:PutObject/DeleteObject/ListBucket` plus `cloudfront:CreateInvalidation` for the upload steps. Resources are scoped to tripwise name prefixes and the state bucket where the service supports resource-level permissions; services that do not (for example some Cognito, CloudFront, and API Gateway create or list actions) use `"*"` with a comment.
+
+Outputs: the state bucket name and the deploy role ARN.
+
+**Remote state for the main config**: `terraform/backend.tf` declares `backend "s3"` with the state bucket, key `tripwise/terraform.tfstate`, region `us-west-2`, `encrypt = true`, and `use_lockfile = true` (S3 native locking, Terraform >= 1.10, no DynamoDB lock table). The existing live stack (suffix `82e81a8a`) has local state at `terraform/terraform.tfstate`. `scripts/migrate-state.sh` copies it to a timestamped backup first, runs `terraform -chdir=terraform init -migrate-state`, and then confirms `terraform plan` reports no changes. `scripts/deploy.sh` keeps working from a laptop against the remote backend.
+
+One-time setup, documented in `docs/ci-cd.md`: apply the bootstrap config, migrate state, set the repository variable `AWS_DEPLOY_ROLE_ARN`, and create the `production` environment with a required reviewer (required reviewers on private repositories need a paid GitHub plan).
+
 ### 12. Web UI design (Req 2, 3, 5–11, 13, 19–23)
 
 The web app in `web/` uses React 18, Vite, and plain CSS. No UI or CSS libraries are added. The UI rework changes presentation only: backend APIs, the API modules in `web/src/api/*.ts`, component props used by other components, and component behavior stay the same.

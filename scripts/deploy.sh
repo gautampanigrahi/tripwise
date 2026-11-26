@@ -17,7 +17,17 @@ echo "==> Building Lambda bundles"
 npm run build:lambdas
 
 echo "==> Applying Terraform"
-terraform -chdir=terraform init -input=false
+# State lives in the S3 backend from terraform/backend.tf. If init fails because the
+# local state has not been moved yet, run scripts/migrate-state.sh once first.
+if ! terraform -chdir=terraform init -input=false; then
+  cat >&2 <<EOF
+error: terraform init failed.
+If the message above says a backend change or state migration is required,
+run scripts/migrate-state.sh once (after applying terraform/bootstrap/), then re-run this script.
+Otherwise check your AWS credentials and that the state bucket exists.
+EOF
+  exit 1
+fi
 terraform -chdir=terraform apply "$@"
 
 out() { terraform -chdir=terraform output -raw "$1"; }

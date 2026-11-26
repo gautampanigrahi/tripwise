@@ -16,8 +16,8 @@ locals {
   reminder_schedules = "arn:${local.partition}:scheduler:${var.region}:${local.account}:schedule/default/${local.reminder_schedule_prefix}*"
   # Nova 2 Lite rejects on-demand model ids in us-west-2. The us. profile routes to
   # us-east-1, us-east-2, and us-west-2, and InvokeModel must allow the profile plus those models.
-  inference_profile    = can(regex("^(us|eu|global)\\.", var.model_id))
-  foundation_model_id  = local.inference_profile ? replace(var.model_id, "/^(us|eu|global)\\./", "") : var.model_id
+  inference_profile   = can(regex("^(us|eu|global)\\.", var.model_id))
+  foundation_model_id = local.inference_profile ? replace(var.model_id, "/^(us|eu|global)\\./", "") : var.model_id
   model_arns = local.inference_profile ? [
     "arn:${local.partition}:bedrock:${var.region}:${local.account}:inference-profile/${var.model_id}",
     "arn:${local.partition}:bedrock:us-east-1::foundation-model/${local.foundation_model_id}",

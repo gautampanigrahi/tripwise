@@ -185,7 +185,7 @@ async function itineraryStops(deps: DraftsDeps, tripId: string): Promise<StopRow
  * A move or removal of one existing stop. A new item with the same name is dropped when a change
  * already names it, so "move Balboa Park to Sunday" does not also add a second Balboa Park.
  */
-function prepareEntries(entries: ParsedDraftEntry[], notes: string): ParsedDraftEntry[] {
+function prepareEntries<T extends ParsedDraftEntry>(entries: T[], notes: string): T[] {
   const about = entries.filter((entry) => draftIsAboutNotes(entry.fields, notes, entry.match));
   const changing = about
     .filter((entry) => entry.action && entry.section === 'Itinerary' && entry.match)

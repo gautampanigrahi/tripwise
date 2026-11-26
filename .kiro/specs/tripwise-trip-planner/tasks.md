@@ -548,6 +548,46 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     - Run the typechecks, all vitest tests, `npm run build:lambdas`, `npm run build -w web`, and `terraform fmt -check` and `terraform validate` in `terraform/`
     - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 22. Add CI/CD with GitHub Actions
+  - Follow the "CI/CD (GitHub Actions)" subsection of design section 11. Repo `github.com/gautampanigrahi/tripwise`, AWS account `651532007957`, region `us-west-2`. Never run `terraform apply` or migrate state in these tasks; the live stack (suffix `82e81a8a`) uses local state at `terraform/terraform.tfstate`.
+  - [x] 22.1 Write the CI workflow
+    - `.github/workflows/ci.yml` on `push` and `pull_request`; top-level `permissions: contents: read`; pinned action major versions (for example `actions/checkout@v4`, `actions/setup-node@v4`, `hashicorp/setup-terraform@v3`)
+    - Node 20 with npm cache; `npm ci`; `npm run typecheck`; `npx vitest --run`; `npm run build:lambdas`; `npm run build -w web`
+    - Terraform (>= 1.10): `terraform fmt -check -recursive`; `terraform init -backend=false` and `terraform validate` in `terraform/` and in `terraform/bootstrap/`
+    - Make the workflow callable (`workflow_call`) so the deploy workflow can reuse it
+    - _Requirements: 25.2, 28.4_
+
+  - [x] 22.2 Write the bootstrap Terraform config
+    - `terraform/bootstrap/versions.tf` (Terraform >= 1.10, AWS provider, region `us-west-2`, local state); `variables.tf` with `github_repo` (default `gautampanigrahi/tripwise`) and `state_bucket_name` (default derived from the account, for example `tripwise-tfstate-651532007957`)
+    - `main.tf`: state bucket (versioning, SSE-S3, all public access blocks, TLS-only bucket policy); OIDC provider for `token.actions.githubusercontent.com` with client ID `sts.amazonaws.com`; deploy role whose trust policy allows only `repo:<github_repo>:environment:production` with `aud` `sts.amazonaws.com`; deploy policy covering the main Terraform config, state bucket access (including the lock file), S3 sync, and CloudFront invalidation, scoped to tripwise resources and the state bucket where practical
+    - `outputs.tf`: state bucket name and deploy role ARN
+    - Do NOT apply
+    - _Requirements: 25.1, 25.2, 25.3, 25.4, 25.5_
+
+  - [x] 22.3 Move the main config to remote state
+    - `terraform/backend.tf`: `backend "s3"` with the bootstrap bucket, key `tripwise/terraform.tfstate`, region `us-west-2`, `encrypt = true`, `use_lockfile = true` (no DynamoDB lock table)
+    - `scripts/migrate-state.sh`: `set -euo pipefail`; copy `terraform/terraform.tfstate` to a timestamped backup; run `terraform -chdir=terraform init -migrate-state`; run `terraform plan -detailed-exitcode` and fail unless it reports no changes
+    - Update `scripts/deploy.sh` only as needed to work with the remote backend
+    - Do NOT run the migration
+    - _Requirements: 25.1, 25.2_
+
+  - [x] 22.4 Write the deploy workflow
+    - `.github/workflows/deploy.yml` on `push` to `main` and `workflow_dispatch`; a first job calls the CI workflow, and the deploy job `needs` it
+    - Deploy job: `environment: production`; `permissions: id-token: write, contents: read`; `concurrency: { group: deploy-production, cancel-in-progress: false }`; `aws-actions/configure-aws-credentials@v4` with `role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}` and region `us-west-2`
+    - Steps: `npm ci`, `npm run build:lambdas`, `terraform init`, `terraform plan -out=tfplan`, `terraform apply tfplan`; then write `web/.env.local` from outputs, `npm run build -w web`, `aws s3 sync web/dist` with `--delete`, `aws s3 sync catalog` to `catalog/` without `--delete`, and a CloudFront invalidation, reusing `scripts/deploy.sh` logic where sensible
+    - No secrets, tokens, or `.env.local` contents in logs
+    - _Requirements: 25.1, 25.2, 28.4_
+
+  - [x] 22.5 Document the one-time CI/CD setup
+    - `docs/ci-cd.md` (or a README section): apply `terraform/bootstrap/`, run `scripts/migrate-state.sh`, set the repository variable `AWS_DEPLOY_ROLE_ARN` from the bootstrap output, and create the `production` environment with a required reviewer
+    - Note that required reviewers on private repositories need a paid GitHub plan
+    - _Requirements: 25.2_
+
+  - [x] 22.6 Checkpoint - Workflows lint, Terraform validates, and all tests pass
+    - Run `actionlint` if available (otherwise a YAML lint) on `.github/workflows/`; `terraform fmt -check -recursive`; `terraform init -backend=false` and `terraform validate` in `terraform/` and `terraform/bootstrap/`; the typechecks and `npx vitest --run`
+    - Never run `terraform apply` and never migrate state
+    - Ensure all tests pass, ask the user if questions arise.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
@@ -561,6 +601,7 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
 - Task 19 switches the Bedrock model from Anthropic Claude to Amazon Nova Lite (`amazon.nova-lite-v1:0`, on-demand in us-west-2) because the AWS Free plan cannot create the AWS Marketplace agreements Claude models require. It depends only on task 18. It sits alone in final wave 23 for ordering; it does not need tasks 15.7, 15.8, or checkpoint 16 to be done.
 - Task 20 reworks the web UI with plain CSS (design section 12) and replaces the basic stylesheet from task 18. It runs in waves 24–27 after task 19. Task 20.1 runs alone because every later sub-task uses its primitives. Tasks 20.2–20.6 touch different files and run in parallel; 20.3 owns `web/src/pages/TripPage.tsx`. Task 20.7 touches all screens, so it runs after them, together with optional tests 20.8.
 - Task 21 implements Requirement 22 (design section 8a) in waves 28–31 after checkpoint 20.9. Task 21.1 runs alone because the handler uses its helpers and types. Tasks 21.3 (API, `routes.ts`, `redact.ts`), 21.4 (Terraform and build script), and 21.5 (web) touch different files and run in parallel; 21.5 needs only the API shape from the design. Optional property tests 21.2 run in their own wave after 21.3 because Property 40 exercises the drafts handler. Checkpoint 21.6 runs last.
+- Task 22 adds CI/CD with GitHub Actions (design section 11, "CI/CD") in waves 32–35. Tasks 22.1 (CI workflow) and 22.2 (bootstrap config) touch different files and run together. Tasks 22.3 (backend and migration script) and 22.4 (deploy workflow) run together after them, because the backend needs the bootstrap bucket name and the deploy workflow reuses the CI workflow. Documentation 22.5 and checkpoint 22.6 follow. No task applies Terraform or migrates state; the user does both by hand after reviewing.
 
 ## Task Dependency Graph
 
@@ -598,7 +639,11 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 28, "tasks": ["21.1"] },
     { "id": 29, "tasks": ["21.3", "21.4", "21.5"] },
     { "id": 30, "tasks": ["21.2"] },
-    { "id": 31, "tasks": ["21.6"] }
+    { "id": 31, "tasks": ["21.6"] },
+    { "id": 32, "tasks": ["22.1", "22.2"] },
+    { "id": 33, "tasks": ["22.3", "22.4"] },
+    { "id": 34, "tasks": ["22.5"] },
+    { "id": 35, "tasks": ["22.6"] }
   ]
 }
 ```
