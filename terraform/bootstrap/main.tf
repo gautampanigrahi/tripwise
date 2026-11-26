@@ -10,6 +10,16 @@ locals {
   state_bucket_name = coalesce(var.state_bucket_name, "tripwise-tfstate-${local.account}")
   oidc_host         = "token.actions.githubusercontent.com"
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  # GitHub sends one of two subject forms depending on the repo's OIDC sub-claim
+  # setting (gh api repos/<owner>/<repo>/actions/oidc/customization/sub):
+  #   immutable: repo:<owner>@<owner_id>/<name>@<repo_id>:environment:production
+  #   legacy:    repo:<owner>/<name>:environment:production
+  github_owner = split("/", var.github_repo)[0]
+  github_name  = split("/", var.github_repo)[1]
+  deploy_subjects = [
+    "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repo_id}:environment:production",
+    "repo:${var.github_repo}:environment:production",
+  ]
 
   # Name patterns from the main config (terraform/*.tf). The suffix is random_id.suffix.
   # Bucket patterns are deliberately narrower than tripwise-* so they never match the
@@ -128,7 +138,7 @@ data "aws_iam_policy_document" "deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["repo:${var.github_repo}:environment:production"]
+      values   = local.deploy_subjects
     }
   }
 }

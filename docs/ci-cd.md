@@ -150,6 +150,19 @@ terraform -chdir=terraform force-unlock <LOCK_ID>
 
 - The deploy job still has `environment: production` and the environment name in GitHub is exactly `production`.
 - `AWS_DEPLOY_ROLE_ARN` is set as a repository variable (`gh variable list -R gautampanigrahi/tripwise`) and matches `terraform -chdir=terraform/bootstrap output -raw deploy_role_arn`.
-- The repository is still `gautampanigrahi/tripwise`. If it was renamed or moved, apply the bootstrap config again with `-var github_repo=<owner>/<name>`.
+- The repository is still `gautampanigrahi/tripwise`. If it was renamed or moved, apply the bootstrap config again with `-var github_repo=<owner>/<name>` (and the new IDs, see below).
+- The token's `sub` claim matches one of the subjects the role allows. Read the repository's sub-claim setting:
+
+  ```sh
+  gh api repos/gautampanigrahi/tripwise/actions/oidc/customization/sub
+  ```
+
+  With `"use_immutable_subject": true` (the current setting), GitHub sends `repo:gautampanigrahi@82938959/tripwise@1471106933:environment:production`, where `82938959` is the owner ID and `1471106933` is the repository ID; the `sub_claim_prefix` field shows the `repo:...` part. Without it, GitHub sends the legacy form `repo:gautampanigrahi/tripwise:environment:production`. The trust policy accepts both forms, for environment `production` only. If the IDs changed (repository recreated or moved to another owner), look them up with `gh api repos/<owner>/<name> --jq '.owner.id, .id'` and re-apply from the laptop:
+
+  ```sh
+  terraform -chdir=terraform/bootstrap apply -var github_owner_id=<owner id> -var github_repo_id=<repo id>
+  ```
+
+  If `use_default` is `false`, the repository uses custom claim keys and the subject has a different shape. Either reset it with `gh api -X PUT repos/<owner>/<name>/actions/oidc/customization/sub -F use_default=true`, or change `local.deploy_subjects` in `terraform/bootstrap/main.tf` to match.
 
 If the error is "Credentials could not be loaded" or the role ARN is empty, the variable is not set (step 4).

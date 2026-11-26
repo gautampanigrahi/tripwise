@@ -14,6 +14,24 @@ variable "github_repo" {
   }
 }
 
+variable "github_owner_id" {
+  description = "Numeric ID of the github_repo owner. Used in the immutable OIDC subject (repo:<owner>@<owner_id>/<name>@<repo_id>:...)."
+  type        = string
+  default     = "82938959"
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "github_owner_id must be a numeric ID."
+  }
+}
+variable "github_repo_id" {
+  description = "Numeric ID of github_repo. Used in the immutable OIDC subject (repo:<owner>@<owner_id>/<name>@<repo_id>:...)."
+  type        = string
+  default     = "1471106933"
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repo_id))
+    error_message = "github_repo_id must be a numeric ID."
+  }
+}
 variable "state_bucket_name" {
   description = "Terraform state bucket name. Null derives tripwise-tfstate-<account id>."
   type        = string

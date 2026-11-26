@@ -1249,6 +1249,18 @@
         "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
         "timestamp": 1795676359336
       }
+    ],
+    "24. Fix the GitHub OIDC trust policy for immutable subject claims": [
+      {
+        "executionId": "ae99b128-02b6-498d-a8be-2e1cee05ff3e",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795677172364
+      },
+      {
+        "executionId": "ae99b128-02b6-498d-a8be-2e1cee05ff3e",
+        "chatSessionId": "sess_3ff1e060-3db2-4f81-96cc-8ae22b20ce1c",
+        "timestamp": 1795677283710
+      }
     ]
   }
 }

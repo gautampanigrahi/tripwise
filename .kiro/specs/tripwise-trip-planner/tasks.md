@@ -594,6 +594,13 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
   - Verify locally: `npm run typecheck`, `npx vitest --run`, and the same test with a simulated non-JSON stderr line
   - _Requirements: 28.4_
 
+- [x] 24. Fix the GitHub OIDC trust policy for immutable subject claims
+  - Root cause (verified): the Deploy job fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity". The repo's OIDC sub-claim setting is `{"use_default":true,"use_immutable_subject":true,"sub_claim_prefix":"repo:gautampanigrahi@82938959/tripwise@1471106933"}`, so GitHub sends `sub = repo:gautampanigrahi@82938959/tripwise@1471106933:environment:production`, but the role trust policy in `terraform/bootstrap/main.tf` requires `repo:gautampanigrahi/tripwise:environment:production`
+  - In `terraform/bootstrap/`: build the allowed subject from new variables (github owner ID 82938959, repo ID 1471106933) and allow both the immutable form and the legacy name form for environment `production` only (StringEquals with a list), keeping `aud = sts.amazonaws.com`
+  - Update `docs/ci-cd.md` troubleshooting with how to read the repo's sub-claim setting (`gh api repos/<owner>/<repo>/actions/oidc/customization/sub`)
+  - Validate with `terraform -chdir=terraform/bootstrap fmt -check` and `validate`, then `terraform -chdir=terraform/bootstrap plan` (the bootstrap has local state on this Mac): it must show only an in-place update to the deploy role's trust policy. Never apply
+  - _Requirements: 25.3_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
@@ -650,7 +657,8 @@ Suggested schedule for three people (A: backend API, B: web app, C: infrastructu
     { "id": 33, "tasks": ["22.3", "22.4"] },
     { "id": 34, "tasks": ["22.5"] },
     { "id": 35, "tasks": ["22.6"] },
-    { "id": 36, "tasks": ["23"] }
+    { "id": 36, "tasks": ["23"] },
+    { "id": 37, "tasks": ["24"] }
   ]
 }
 ```
